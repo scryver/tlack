@@ -1,9 +1,32 @@
+struct Expression;
+
+enum DeclKind
+{
+    Decl_None,
+    Decl_Int,
+    //Decl_Float,
+};
+struct Declaration
+{
+    DeclKind kind;
+    
+    union {
+        s64 intVal;
+        //f64 floatVal;
+    };
+};
+
 enum UnaryOpType
 {
     Unary_None,
     Unary_Minus,
     Unary_Flip,
     Unary_Not,
+};
+struct UnaryOp
+{
+    UnaryOpType op;
+    Expression *operand;
 };
 
 enum BinaryOpType
@@ -14,15 +37,11 @@ enum BinaryOpType
     Binary_Mul,
     Binary_Div,
 };
-
-enum AssignOpType
+struct BinaryOp
 {
-    Assign_None,
-    Assign_Set,
-    Assign_Add,
-    Assign_Sub,
-    Assign_Mul,
-    Assign_Div,
+    BinaryOpType op;
+    Expression *left;
+    Expression *right;
 };
 
 enum ExprKind
@@ -33,29 +52,6 @@ enum ExprKind
     Expr_Unary,
     Expr_Binary,
 };
-
-enum StmtKind
-{
-    Stmt_None,
-    Stmt_Assign,
-    Stmt_Return,
-};
-
-struct Expression;
-
-struct UnaryOp
-{
-    UnaryOpType op;
-    Expression *operand;
-};
-
-struct BinaryOp
-{
-    BinaryOpType op;
-    Expression *left;
-    Expression *right;
-};
-
 struct Expression
 {
     //SourcePos origin;
@@ -70,6 +66,15 @@ struct Expression
     };
 };
 
+enum AssignOpType
+{
+    Assign_None,
+    Assign_Set,
+    Assign_Add,
+    Assign_Sub,
+    Assign_Mul,
+    Assign_Div,
+};
 struct Assignment
 {
     AssignOpType op;
@@ -77,6 +82,12 @@ struct Assignment
     Expression *right;
 };
 
+enum StmtKind
+{
+    Stmt_None,
+    Stmt_Assign,
+    Stmt_Return,
+};
 struct Statement
 {
     //SourcePos origin;

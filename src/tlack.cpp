@@ -1,5 +1,15 @@
+#define USE_LINUX_PLATFORM    1
+#define USE_STD_PLATFORM      0
+
 #include "../libberdip/src/platform.h"
+
+#if USE_LINUX_PLATFORM
 #include "../libberdip/src/linux_memory.h"
+#elif USE_STD_PLATFORM
+#include "../libberdip/src/std_memory.h"
+#else
+#error NO PLATFORM DEFINED
+#endif
 
 #include "ast.h"
 
@@ -12,7 +22,11 @@
 #include <fcntl.h>
 #include <dirent.h>
 
-global MemoryAPI gMemoryApi;
+global MemoryAPI gMemoryApi_;
+global MemoryAPI *gMemoryApi = &gMemoryApi_;
+
+global FileAPI gFileApi_;
+global FileAPI *gFileApi = &gFileApi_;
 
 internal Buffer
 allocate_buffer(MemoryAllocator *allocator, umm size)
@@ -45,18 +59,21 @@ make_executable(Buffer buffer)
     if (buffer.data)
     {
         PlatformMemoryBlock *block = (PlatformMemoryBlock *)((u8 *)buffer.data - sizeof(PlatformMemoryBlock));
-        result = gMemoryApi.executable_memory(block);
+        result = gMemoryApi->executable_memory(block);
     }
     return result;
 }
 
-global FileAPI gFileApi_;
-global FileAPI *gFileApi = &gFileApi_;
-
 #include "../libberdip/src/memory.cpp"
-#include "../libberdip/src/linux_memory.cpp"
 #include "../libberdip/src/files.cpp"
+
+#if USE_LINUX_PLATFORM
+#include "../libberdip/src/linux_memory.cpp"
 #include "../libberdip/src/linux_file.c"
+#elif USE_STD_PLATFORM
+#include "../libberdip/src/std_memory.cpp"
+#include "../libberdip/src/std_file.c"
+#endif
 
 //#include "instruction.cpp"
 #include "ast.cpp"
@@ -86,8 +103,13 @@ emit_jump_i(Assembler *assembler)
 
 s32 main(s32 argc, char **argv)
 {
-    linux_memory_api(&gMemoryApi);
+#if USE_LINUX_PLATFORM
+    linux_memory_api(gMemoryApi);
     linux_file_api(gFileApi);
+#elif USE_STD_PLATFORM
+    std_memory_api(gMemoryApi);
+    std_file_api(gFileApi);
+#endif
     
     MemoryAllocator defaultAlloc = {};
     initialize_platform_allocator(0, &defaultAlloc);

@@ -54,11 +54,11 @@ print_expression(FileStream *output, Expression *expression)
     switch (expression->kind)
     {
         case Expr_Int: {
-            println(output, "<Expression 'int' %ld />", expression->intConst);
+            print(output, "%ld", expression->intConst);
         } break;
         
         case Expr_Identifier: {
-            println(output, "<Expression 'id' '%.*s' />", STR_FMT(expression->name));
+            print(output, "%.*s", STR_FMT(expression->name));
         } break;
         
         case Expr_Unary: {
@@ -70,11 +70,9 @@ print_expression(FileStream *output, Expression *expression)
                 case Unary_Not  : unaryName = "!"; break;
                 INVALID_DEFAULT_CASE;
             }
-            println(output, "<Expression 'unary' '%s'>", unaryName);
-            ++output->indent;
+            print(output, "( %s ", unaryName);
             print_expression(output, expression->unary.operand);
-            --output->indent;
-            println(output, "</Expression>");
+            print(output, " )");
         } break;
         
         case Expr_Binary: {
@@ -87,15 +85,11 @@ print_expression(FileStream *output, Expression *expression)
                 case Binary_Div : binaryName = "/"; break;
                 INVALID_DEFAULT_CASE;
             }
-            println(output, "<Expression 'binary' '%s'>", binaryName);
-            ++output->indent;
+            print(output, "( ");
             print_expression(output, expression->binary.left);
-            --output->indent;
-            println(output, "<Op '%s'>", binaryName);
-            ++output->indent;
+            print(output, " %s ", binaryName);
             print_expression(output, expression->binary.right);
-            --output->indent;
-            println(output, "</Expression>");
+            print(output, " )");
         } break;
         
         INVALID_DEFAULT_CASE;
@@ -118,28 +112,22 @@ print_statement(FileStream *output, Statement *statement)
                 case Assign_Div : assignName = "/="; break;
                 INVALID_DEFAULT_CASE;
             }
-            println(output, "<Assign '%s'>", assignName);
-            ++output->indent;
+            println_begin(output, "( ");
             print_expression(output, statement->assign.left);
-            --output->indent;
-            println(output, "<Op '%s'>", assignName);
-            ++output->indent;
+            print(output, " %s ", assignName);
             print_expression(output, statement->assign.right);
-            --output->indent;
-            println(output, "</Assign>");
+            println_end(output, " )");
         } break;
         
         case Stmt_Return: {
             if (statement->expression) {
-                println(output, "<Return>");
-                ++output->indent;
+                println_begin(output, "( return ");
                 print_expression(output, statement->expression);
-                --output->indent;
-                println(output, "</Return>");
+                println_end(output, " )");
             }
             else
             {
-                println(output, "<Return />");
+                println(output, "( return )");
             }
         } break;
         
@@ -150,34 +138,34 @@ print_statement(FileStream *output, Statement *statement)
 internal void
 print_stmt_block(FileStream *output, StmtBlock *block)
 {
-    println(output, "<Statement Block>");
+    println(output, "(");
     ++output->indent;
     for (u32 stmtIdx = 0; stmtIdx < block->stmtCount; ++stmtIdx)
     {
         print_statement(output, block->statements[stmtIdx]);
     }
     --output->indent;
-    println(output, "</Statement Block>");
+    println(output, ")");
 }
 
 internal void
 print_function(FileStream *output, Function *function)
 {
-    println(output, "<Function '%.*s'>", STR_FMT(function->name));
+    println(output, "( func %.*s", STR_FMT(function->name));
     ++output->indent;
     print_stmt_block(output, function->body);
     --output->indent;
-    println(output, "</Function>");
+    println(output, ")");
 }
 
 internal void
 print_program(FileStream *output, Program *program)
 {
-    println(output, "<Program>");
+    println(output, "( program");
     ++output->indent;
     print_function(output, program->main);
     --output->indent;
-    println(output, "</Program>");
+    println(output, ")");
 }
 
 internal void
