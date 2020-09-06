@@ -123,19 +123,7 @@ s32 main(s32 argc, char **argv)
     assembler->codeAt = kilobytes(4);
     initialize_free_registers(assembler);
     
-#if 0    
-    emit_mov_imm(assembler, Reg_EAX, 0xFFFFAB00);
-    emit_mov_imm(assembler, Reg_RAX, 0xFFFFFFAB00);
-    emit_mov_imm(assembler, Reg_R14, 0xAB00);
-    emit_mul_reg(assembler, Reg_R14D, false);
-    emit_mov_reg(assembler, Reg_RAX, Reg_RDX);
-    emit_ret(assembler);
-#endif
-    
     Ast mainAst = {};
-    
-    Function mainFunc = {};
-    mainFunc.name = minterned_string(&mainAst.interns, "main");
     
 #if 1
     
@@ -152,6 +140,12 @@ s32 main(s32 argc, char **argv)
     Expression const4b = create_expression(4);
     Expression const5 = create_expression(5);
     
+    Expression const1234 = create_expression(0x1234);
+    Expression named;
+    named.kind = Expr_Identifier;
+    named.name = static_string("test");
+    Statement set1  = create_assign_stmt(Assign_Set, &named, &const1234);
+    
     Expression add1 = create_expression(Binary_Add, &const3, &const4a);
     Expression mul1 = create_expression(Binary_Mul, &const2, &add1);
     Expression mul2 = create_expression(Binary_Mul, &const6, &const7);
@@ -160,23 +154,15 @@ s32 main(s32 argc, char **argv)
     Expression sub1 = create_expression(Binary_Sub, &const0, &const4b);
     Expression mul3 = create_expression(Binary_Mul, &sub1, &const5);
     Expression add3 = create_expression(Binary_Add, &div1, &mul3);
-    Statement ret1  = create_return_stmt(&add3);
-    
-    Expression const1234 = create_expression(1234);
-    Expression named;
-    named.kind = Expr_Identifier;
-    named.name = static_string("test");
-    Statement set1  = create_assign_stmt(Assign_Set, &named, &const1234);
+    Expression sub2 = create_expression(Binary_Sub, &add3, &named);
+    Statement ret1  = create_return_stmt(&sub2);
     
     Statement *list[] = {
         &set1,
         &ret1,
     };
-    StmtBlock block;
-    block.stmtCount = array_count(list);
-    block.statements = list;
-    
-    mainFunc.body = &block;
+    StmtBlock block = create_statement_block(array_count(list), list);
+    Function mainFunc = create_function(minterned_string(&mainAst.interns, "main"), &block);
 #else
     Expression constExpr = {};
     constExpr.kind = Expr_Int;

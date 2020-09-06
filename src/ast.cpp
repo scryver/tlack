@@ -48,6 +48,24 @@ create_return_stmt(Expression *returned)
     return result;
 }
 
+internal StmtBlock
+create_statement_block(u32 statementCount, Statement **statements)
+{
+    StmtBlock result = {};
+    result.stmtCount = statementCount;
+    result.statements = statements;
+    return result;
+}
+
+internal Function
+create_function(String name, StmtBlock *body)
+{
+    Function result = {};
+    result.name = name;
+    result.body = body;
+    return result;
+}
+
 internal void
 print_expression(FileStream *output, Expression *expression)
 {

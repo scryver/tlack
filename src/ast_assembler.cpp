@@ -18,6 +18,22 @@ struct AsmOperand
     };
 };
 
+#define emit_r_frame_offset(op, offset, dst) \
+if (((offset) >= S8_MIN) && ((offset) <= S8_MAX)) { \
+emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
+} else { \
+i_expect(((offset) >= S32_MIN) && ((offset) <= S32_MAX)); \
+emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
+}
+
+#define emit_x_frame_offset(op, offset) \
+if (((offset) >= S8_MIN) && ((offset) <= S8_MAX)) { \
+emit_x_mb(assembler, op, Reg_RBP, (offset)); \
+} else { \
+i_expect(((offset) >= S32_MIN) && ((offset) <= S32_MAX)); \
+emit_x_md(assembler, op, Reg_RBP, (offset)); \
+}
+
 internal void
 initialize_free_registers(Assembler *assembler)
 {
@@ -103,15 +119,7 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
         } break;
         
         case AsmOperand_FrameOffset: {
-            if ((operand->oFrameOffset >= S8_MIN) && (operand->oFrameOffset <= S8_MAX))
-            {
-                emit_r_mb(assembler, mov, targetReg, Reg_RBP, operand->oFrameOffset);
-            }
-            else
-            {
-                i_expect((operand->oFrameOffset >= S32_MIN) && (operand->oFrameOffset <= S32_MAX));
-                emit_r_md(assembler, mov, targetReg, Reg_RBP, operand->oFrameOffset);
-            }
+            emit_r_frame_offset(mov, operand->oFrameOffset, targetReg);
         } break;
         
         case AsmOperand_Address: {
@@ -205,15 +213,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else if (src->kind == AsmOperand_FrameOffset)
         {
-            if ((src->oFrameOffset >= S8_MIN) && (src->oFrameOffset <= S8_MAX))
-            {
-                emit_r_mb(assembler, mov, dst->oRegister, Reg_RBP, src->oFrameOffset);
-            }
-            else
-            {
-                i_expect((src->oImmediate >= S32_MIN) && (src->oImmediate <= S32_MAX));
-                emit_r_md(assembler, mov, dst->oRegister, Reg_RBP, src->oFrameOffset);
-            }
+            emit_r_frame_offset(mov, src->oFrameOffset, dst->oRegister);
         }
         else if (src->kind == AsmOperand_Address)
         {
@@ -303,15 +303,7 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             } break;
             
             case AsmOperand_FrameOffset: {
-                if ((src->oFrameOffset >= S8_MIN) && (src->oFrameOffset <= S8_MAX))
-                {
-                    emit_r_mb(assembler, add, dst->oRegister, Reg_RBP, src->oFrameOffset);
-                }
-                else
-                {
-                    i_expect((src->oFrameOffset >= S32_MIN) && (src->oFrameOffset <= S32_MAX));
-                    emit_r_md(assembler, add, dst->oRegister, Reg_RBP, src->oFrameOffset);
-                }
+                emit_r_frame_offset(add, src->oFrameOffset, dst->oRegister);
             } break;
             
             case AsmOperand_Address: {
@@ -360,15 +352,7 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             } break;
             
             case AsmOperand_FrameOffset: {
-                if ((src->oFrameOffset >= S8_MIN) && (src->oFrameOffset <= S8_MAX))
-                {
-                    emit_r_mb(assembler, sub, dst->oRegister, Reg_RBP, src->oFrameOffset);
-                }
-                else
-                {
-                    i_expect((src->oFrameOffset >= S32_MIN) && (src->oFrameOffset <= S32_MAX));
-                    emit_r_md(assembler, sub, dst->oRegister, Reg_RBP, src->oFrameOffset);
-                }
+                emit_r_frame_offset(sub, src->oFrameOffset, dst->oRegister);
             } break;
             
             case AsmOperand_Address: {
@@ -409,15 +393,7 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         
         if (src->kind == AsmOperand_FrameOffset)
         {
-            if ((src->oFrameOffset >= S8_MIN) && (src->oFrameOffset <= S8_MAX))
-            {
-                emit_x_mb(assembler, mul, Reg_RBP, src->oFrameOffset);
-            }
-            else
-            {
-                i_expect((src->oFrameOffset >= S32_MIN) && (src->oFrameOffset <= S32_MAX));
-                emit_x_md(assembler, mul, Reg_RBP, src->oFrameOffset);
-            }
+            emit_x_frame_offset(mul, src->oFrameOffset);
         }
         else if (src->kind == AsmOperand_Address)
         {
@@ -455,15 +431,7 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         
         if (src->kind == AsmOperand_FrameOffset)
         {
-            if ((src->oFrameOffset >= S8_MIN) && (src->oFrameOffset <= S8_MAX))
-            {
-                emit_x_mb(assembler, div, Reg_RBP, src->oFrameOffset);
-            }
-            else
-            {
-                i_expect((src->oFrameOffset >= S32_MIN) && (src->oFrameOffset <= S32_MAX));
-                emit_x_md(assembler, div, Reg_RBP, src->oFrameOffset);
-            }
+            emit_x_frame_offset(div, src->oFrameOffset);
         }
         else if (src->kind == AsmOperand_Address)
         {
