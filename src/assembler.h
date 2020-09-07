@@ -1,4 +1,3 @@
-
 enum AsmOperandKind
 {
     AsmOperand_None,
@@ -70,49 +69,4 @@ is_32bit_unsigned(s64 value)
     return (value >= 0) && (value <= (s64)(u64)U32_MAX);
 }
 
-internal AsmSymbol *
-create_global_sym(Assembler *assembler, AsmSymbolKind kind, String name, umm address)
-{
-    i_expect(assembler->globalCount < MAX_GLOBAL_SYMBOLS);
-    AsmSymbol *result = assembler->globals + assembler->globalCount++;
-    result->kind = kind;
-    result->name = name;
-    result->operand.kind = AsmOperand_Address;
-    result->operand.oAddress = address;
-    
-    mmap_put(&assembler->globalMap, result->name.data, result);
-    
-    return result;
-}
-
-internal AsmSymbol *
-create_local_sym(Assembler *assembler, AsmSymbolKind kind, String name)
-{
-    i_expect(assembler->localCount < MAX_LOCAL_SYMBOLS);
-    AsmSymbol *result = assembler->locals + assembler->localCount++;
-    result->kind = kind;
-    result->name = name;
-    result->operand.kind = AsmOperand_FrameOffset;
-    result->operand.oFrameOffset = -8 * (s64)assembler->localCount;
-    return result;
-}
-
-internal AsmSymbol *
-find_symbol(Assembler *assembler, String name)
-{
-    AsmSymbol *result = 0;
-    for (u32 onePast = assembler->localCount; onePast > 0; --onePast)
-    {
-        AsmSymbol *test = assembler->locals + onePast - 1;
-        if (test->name == name)
-        {
-            result = test;
-        }
-    }
-    
-    if (!result)
-    {
-        result = (AsmSymbol *)mmap_get(&assembler->globalMap, name.data);
-    }
-    return result;
-}
+internal void initialize_free_registers(Assembler *assembler);

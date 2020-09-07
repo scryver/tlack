@@ -54,7 +54,7 @@ enum ExprKind
 };
 struct Expression
 {
-    //SourcePos origin;
+    SourcePos origin;
     ExprKind kind;
     
     union {
@@ -62,7 +62,6 @@ struct Expression
         String name;
         UnaryOp unary;
         BinaryOp binary;
-        //Expr *nextFree;
     };
 };
 
@@ -90,7 +89,7 @@ enum StmtKind
 };
 struct Statement
 {
-    //SourcePos origin;
+    SourcePos origin;
     StmtKind kind;
     
     union {
@@ -107,6 +106,7 @@ struct StmtBlock
 
 struct Function
 {
+    SourcePos origin;
     String name;
     StmtBlock *body;
 };

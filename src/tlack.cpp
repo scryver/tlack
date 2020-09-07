@@ -13,7 +13,6 @@
 
 #include "ast.h"
 
-//#include "instruction.h"
 #include "assembler_amd64.h"
 #include "assembler.h"
 
@@ -76,7 +75,6 @@ make_executable(Buffer buffer, umm offset)
 #include "../libberdip/src/std_file.c"
 #endif
 
-//#include "instruction.cpp"
 #include "ast.cpp"
 #include "assembler.cpp"
 #include "assembler_amd64.cpp"
@@ -85,7 +83,6 @@ make_executable(Buffer buffer, umm offset)
 
 #include "graphviz.cpp"
 #include "graph_ast.cpp"
-//#include "graph_instruction.cpp"
 
 #define FUNC_CALL(name)   u64 name(void)
 typedef FUNC_CALL(FuncCall);
@@ -182,20 +179,15 @@ test_emitter(Assembler *assembler)
 internal void
 test_simple_bytes(MemoryAllocator *allocator)
 {
-    Buffer execBuild = allocate_buffer(allocator, 4096);
-    Assembler assembler_ = {};
-    Assembler *assembler = &assembler_;
-    assembler->allocator = allocator;
-    assembler->codeData = execBuild;
-    initialize_free_registers(assembler);
+    Assembler *assembler = create_assembler(allocator, kilobytes(4));
     //emit_mov32_r_i(assembler, Reg_RAX, 0xFFFFFFFF);
     //emit_mov64_r_i(assembler, Reg_RAX, 0xFFFFFFFF);
     emit_r_i(assembler, movsx, Reg_RAX, 0xFFFFFFFF);
     emit_ret(assembler);
     
-    if (make_executable(execBuild, 0))
+    if (make_executable(assembler->codeData, 0))
     {
-        FuncCall *func = (FuncCall *)execBuild.data;
+        FuncCall *func = (FuncCall *)assembler->codeData.data;
         u64 x = func();
         fprintf(stdout, "Got 0x%016lX | %ld\n", x, x);
     }
@@ -203,6 +195,9 @@ test_simple_bytes(MemoryAllocator *allocator)
     {
         fprintf(stderr, "Failed making it execute\n");
     }
+    
+    deallocate(allocator, assembler->codeData.data);
+    deallocate(allocator, assembler);
 }
 
 s32 main(s32 argc, char **argv)
@@ -218,23 +213,16 @@ s32 main(s32 argc, char **argv)
     MemoryAllocator defaultAlloc = {};
     initialize_platform_allocator(0, &defaultAlloc);
     
-    Buffer codeBuild = allocate_buffer(&defaultAlloc, megabytes(1ULL));
-    
-    //Assembler assembler_ = {};
-    Assembler *assembler = allocate_struct(&defaultAlloc, Assembler, default_memory_alloc());
-    assembler->allocator = &defaultAlloc;
-    assembler->codeData = codeBuild;
-    assembler->codeAt = kilobytes(4);
-    initialize_free_registers(assembler);
+    Assembler *assembler = create_assembler(&defaultAlloc, megabytes(1ULL), kilobytes(4));
     
     //test_emitter(assembler);
-    i_expect(assembler->codeAt < (codeBuild.size - 0x1000));
+    i_expect(assembler->codeAt < (assembler->codeData.size - 0x1000));
     assembler->codeAt = (assembler->codeAt + 0xFFF) & ~0xFFF;
     
-    String langName = static_string("test/simple.tlk");
-    Buffer langTest = gFileApi->read_entire_file(&defaultAlloc, langName);
     Ast mainAst = {};
 #if 1
+    String langName = static_string("test/simple.tlk");
+    Buffer langTest = gFileApi->read_entire_file(&defaultAlloc, langName);
     ast_from_tlk(&mainAst, langName, langTest);
 #else
     // NOTE(michiel): 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5
@@ -280,13 +268,7 @@ s32 main(s32 argc, char **argv)
     printStream.file = gFileApi->open_file(string("stdout"), FileOpen_Write);
     print_ast(&printStream, &mainAst);
     
-    //OpBuilder opBuilder = {};
-    //opBuilder.instrStorage = allocate_buffer(4096);
-    //instr_from_ast(&opBuilder, &mainAst);
-    //print_instructions(&printStream, &opBuilder);
-    
     graph_ast(&mainAst, "mainast.dot");
-    //graph_instructions(&opBuilder, "maininstr.dot");
     
     u64 callAddress = assembler->codeAt;
     fprintf(stderr, "Code at: 0x%016lX | %lu\n", callAddress, callAddress);
@@ -294,9 +276,9 @@ s32 main(s32 argc, char **argv)
     dump_code(assembler, string("test.bin"));
     
     // NOTE(michiel): Offset at least 64 bytes less than where the code starts. (sizeof(LinuxMemoryBlock))
-    if (1 && make_executable(codeBuild, 4000))
+    if (1 && make_executable(assembler->codeData, 4000))
     {
-        FuncCall *func = (FuncCall *)(codeBuild.data + callAddress);
+        FuncCall *func = (FuncCall *)(assembler->codeData.data + callAddress);
         u64 x = func();
         gFileApi->write_fmt_to_file(&printStream.file, "Got 0x%016lX | %ld\n", x, x);
     }

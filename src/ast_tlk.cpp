@@ -18,10 +18,12 @@ parse_base(Tokenizer *tokenizer, Ast *ast)
     {
         s64 value = number_from_string(token.value);
         result = create_signed_int(ast, value);
+        result->origin = token.origin;
     }
     else if (token.kind == Token_Name)
     {
         result = create_identifier(ast, token.value);
+        result->origin = token.origin;
     }
     else if (token.kind == Token_ParenOpen)
     {
@@ -50,6 +52,7 @@ parse_unary(Tokenizer *tokenizer, Ast *ast)
         Expression *operand = parse_unary(tokenizer, ast);
         
         result = create_unary_expr(ast, opType, operand);
+        result->origin = token.origin;
     }
     else
     {
@@ -62,6 +65,7 @@ parse_unary(Tokenizer *tokenizer, Ast *ast)
 internal Expression *
 parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
 {
+    SourcePos origin = tokenizer->origin;
     Expression *left = parse_unary(tokenizer, ast);
     Token token = peek_token(tokenizer);
     while ((token.kind == Token_Multiply) || (token.kind == Token_Divide))
@@ -73,11 +77,13 @@ parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
         if (token.kind == Token_Multiply)
         {
             left = create_binary_expr(ast, Binary_Mul, left, right);
+            left->origin = origin;
         }
         else
         {
             i_expect(token.kind == Token_Divide);
             left = create_binary_expr(ast, Binary_Div, left, right);
+            left->origin = origin;
         }
         
         token = peek_token(tokenizer);
@@ -88,6 +94,7 @@ parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
 internal Expression *
 parse_expression(Tokenizer *tokenizer, Ast *ast)
 {
+    SourcePos origin = tokenizer->origin;
     Expression *left = parse_mul_expr(tokenizer, ast);
     Token token = peek_token(tokenizer);
     while ((token.kind == Token_Add) || (token.kind == Token_Subtract))
@@ -99,11 +106,13 @@ parse_expression(Tokenizer *tokenizer, Ast *ast)
         if (token.kind == Token_Add)
         {
             left = create_binary_expr(ast, Binary_Add, left, right);
+            left->origin = origin;
         }
         else
         {
             i_expect(token.kind == Token_Subtract);
             left = create_binary_expr(ast, Binary_Sub, left, right);
+            left->origin = origin;
         }
         
         token = peek_token(tokenizer);
@@ -140,6 +149,7 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
         expect_token(tokenizer, Token_SemiColon);
         result = create_assign_stmt(ast, opType, left, right);
     }
+    result->origin = base.origin;
     return result;
 }
 
@@ -167,10 +177,10 @@ parse_statement_block(Tokenizer *tokenizer, Ast *ast)
     return result;
 }
 
-
 internal Function *
 parse_function(Tokenizer *tokenizer, Ast *ast)
 {
+    SourcePos origin = tokenizer->origin;
     expect_name(tokenizer, static_string("func"));
     Token name = expect_token(tokenizer, Token_Name);
     Token token = expect_token(tokenizer, Token_ParenOpen);
@@ -185,6 +195,7 @@ parse_function(Tokenizer *tokenizer, Ast *ast)
     StmtBlock *stmtBody = parse_statement_block(tokenizer, ast);
     
     Function *result = create_function(ast, name.value, stmtBody);
+    result->origin = origin;
     return result;
 }
 

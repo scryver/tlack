@@ -85,18 +85,6 @@ create_statement_block(Ast *ast, u32 statementCount, Statement **statements)
     result->stmtCount = statementCount;
     result->statements = (Statement **)ast_allocate(ast, sizeof(Statement *)*statementCount);
     copy(sizeof(Statement *)*statementCount, statements, result->statements);
-    
-#if 0    
-    for (u32 *stmtIdx = 0; stmtIdx < result->stmtCount; ++stmtIdx)
-    {
-        Statement *statement = result->statements[stmtIdx];
-        if (statement->kind == Stmt_Block)
-        {
-            // TODO(michiel): Backpatch parent pointer
-        }
-    }
-#endif
-    
     return result;
 }
 

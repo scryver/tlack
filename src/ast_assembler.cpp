@@ -1,3 +1,28 @@
+// TODO(michiel): Add Token to error
+internal void
+ast_assemble_error(SourcePos origin, char *fmt, va_list args)
+{
+    if (origin.filename.size)
+    {
+        fprintf(stderr, "AST->ASM::ERROR::%.*s:%d:%d\n\t", STR_FMT(origin.filename), origin.line, origin.column);
+    }
+    else
+    {
+        fprintf(stderr, "AST->ASM::ERROR::%d:%d\n\t", origin.line, origin.column);
+    }
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+}
+
+internal void
+ast_assemble_error(SourcePos origin, char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    ast_assemble_error(origin, fmt, args);
+    va_end(args);
+}
+
 #define emit_r_frame_offset(op, offset, dst) \
 if (is_8bit(offset)) { \
 emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
@@ -221,7 +246,6 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            fprintf(stderr, "TEST %ld\n", dst->oFrameOffset);
             i_expect(is_32bit(dst->oFrameOffset));
             if (src->kind == AsmOperand_Immediate)
             {
@@ -458,7 +482,7 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
             }
             else
             {
-                fprintf(stderr, "Identifier '%.*s' was not declared.\n", STR_FMT(expression->name));
+                ast_assemble_error(expression->origin, "Identifier '%.*s' was not declared.\n", STR_FMT(expression->name));
                 //FileStream errors = {};
                 //errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
                 //print_expression(&errors, expression);
@@ -550,7 +574,7 @@ emit_statement(Assembler *assembler, Statement *statement)
             }
             else
             {
-                fprintf(stderr, "Left side of assignment must be an identifier.\n");
+                ast_assemble_error(statement->origin, "Left side of assignment must be an identifier.\n");
 #if 0                
                 fprintf(stderr, "\nERRROROORROROROORRRR:\nMichiel moet dit nog doen...\n\n");
                 FileStream errors = {};
