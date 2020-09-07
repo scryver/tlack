@@ -1,0 +1,37 @@
+
+enum u8 SmallEnum {
+   A_VALUE = 3,   // Assignable
+   B_VALUE,       // = 4
+   C_VALUE,       // = 5
+   MAX_VALUE = 0xFF,
+   WRAP_AROUND, // Will be 0, with a warning
+}
+
+enum s8 SmallerEnum {
+   A_VALUE = -3,  // Assignable
+   B_VALUE,       // = -2
+   C_VALUE,       // = -1
+   MAX_VALUE = 0x7F,
+   WRAP_AROUND, // Will be -128, with a warning
+}
+
+struct StructType {
+    s8 small;
+    s16 medium;
+    s16 medium2;
+    s32 large;
+    s64 huge;
+}
+
+sizeof(StructType) == 24
+offsetof(StructType, medium) == 2
+offsetof(StructType, large) == 8
+offsetof(StructType, huge) == 16
+
+// NOTE(michiel): Declaration
+name : type = initializer;
+name : type; // zero initialized
+name := initializer; // inferred type from initializer
+
+// NOTE(michiel): Assignment to already declared name
+name = value;

@@ -1,68 +1,111 @@
-internal Expression
-create_expression(s64 intConst)
+internal void *
+ast_allocate(Ast *ast, umm size)
 {
-    Expression result = {};
-    result.kind = Expr_Int;
-    result.intConst = intConst;
+    void *result = arena_allocate_size(&ast->arena, size, default_memory_alloc());
     return result;
 }
 
-internal Expression
-create_expression(UnaryOpType op, Expression *operand)
+internal Expression *
+allocate_expression(Ast *ast, ExprKind kind)
 {
-    Expression result = {};
-    result.kind = Expr_Unary;
-    result.unary.op = op;
-    result.unary.operand = operand;
+    // TODO(michiel): Allocate depending on the kind
+    Expression *result = (Expression *)ast_allocate(ast, sizeof(Expression));
+    i_expect(result);
+    result->kind = kind;
     return result;
 }
 
-internal Expression
-create_expression(BinaryOpType op, Expression *left, Expression *right)
+internal Statement *
+allocate_statement(Ast *ast, StmtKind kind)
 {
-    Expression result = {};
-    result.kind = Expr_Binary;
-    result.binary.op = op;
-    result.binary.left = left;
-    result.binary.right = right;
+    // TODO(michiel): Allocate depending on the kind
+    Statement *result = (Statement *)ast_allocate(ast, sizeof(Statement));
+    i_expect(result);
+    result->kind = kind;
     return result;
 }
 
-internal Statement
-create_assign_stmt(AssignOpType op, Expression *left, Expression *right)
+internal Expression *
+create_signed_int(Ast *ast, s64 intConst)
 {
-    Statement result = {};
-    result.kind = Stmt_Assign;
-    result.assign.op = op;
-    result.assign.left = left;
-    result.assign.right = right;
+    Expression *result = allocate_expression(ast, Expr_Int);
+    result->intConst = intConst;
     return result;
 }
 
-internal Statement
-create_return_stmt(Expression *returned)
+internal Expression *
+create_identifier(Ast *ast, String name)
 {
-    Statement result = {};
-    result.kind = Stmt_Return;
-    result.expression = returned;
+    Expression *result = allocate_expression(ast, Expr_Identifier);
+    result->name = minterned_string(&ast->interns, name);
     return result;
 }
 
-internal StmtBlock
-create_statement_block(u32 statementCount, Statement **statements)
+internal Expression *
+create_unary_expr(Ast *ast, UnaryOpType op, Expression *operand)
 {
-    StmtBlock result = {};
-    result.stmtCount = statementCount;
-    result.statements = statements;
+    Expression *result = allocate_expression(ast, Expr_Unary);
+    result->unary.op = op;
+    result->unary.operand = operand;
     return result;
 }
 
-internal Function
-create_function(String name, StmtBlock *body)
+internal Expression *
+create_binary_expr(Ast *ast, BinaryOpType op, Expression *left, Expression *right)
 {
-    Function result = {};
-    result.name = name;
-    result.body = body;
+    Expression *result = allocate_expression(ast, Expr_Binary);
+    result->binary.op = op;
+    result->binary.left = left;
+    result->binary.right = right;
+    return result;
+}
+
+internal Statement *
+create_assign_stmt(Ast *ast, AssignOpType op, Expression *left, Expression *right)
+{
+    Statement *result = allocate_statement(ast, Stmt_Assign);
+    result->assign.op = op;
+    result->assign.left = left;
+    result->assign.right = right;
+    return result;
+}
+
+internal Statement *
+create_return_stmt(Ast *ast, Expression *returned)
+{
+    Statement *result = allocate_statement(ast, Stmt_Return);
+    result->expression = returned;
+    return result;
+}
+
+internal StmtBlock *
+create_statement_block(Ast *ast, u32 statementCount, Statement **statements)
+{
+    StmtBlock *result = (StmtBlock *)ast_allocate(ast, sizeof(StmtBlock));
+    result->stmtCount = statementCount;
+    result->statements = (Statement **)ast_allocate(ast, sizeof(Statement *)*statementCount);
+    copy(sizeof(Statement *)*statementCount, statements, result->statements);
+    
+#if 0    
+    for (u32 *stmtIdx = 0; stmtIdx < result->stmtCount; ++stmtIdx)
+    {
+        Statement *statement = result->statements[stmtIdx];
+        if (statement->kind == Stmt_Block)
+        {
+            // TODO(michiel): Backpatch parent pointer
+        }
+    }
+#endif
+    
+    return result;
+}
+
+internal Function *
+create_function(Ast *ast, String name, StmtBlock *body)
+{
+    Function *result = (Function *)ast_allocate(ast, sizeof(Function));
+    result->name = minterned_string(&ast->interns, name);
+    result->body = body;
     return result;
 }
 
@@ -88,9 +131,9 @@ print_expression(FileStream *output, Expression *expression)
                 case Unary_Not  : unaryName = "!"; break;
                 INVALID_DEFAULT_CASE;
             }
-            print(output, "( %s ", unaryName);
+            print(output, "(%s ", unaryName);
             print_expression(output, expression->unary.operand);
-            print(output, " )");
+            print(output, ")");
         } break;
         
         case Expr_Binary: {
@@ -103,11 +146,11 @@ print_expression(FileStream *output, Expression *expression)
                 case Binary_Div : binaryName = "/"; break;
                 INVALID_DEFAULT_CASE;
             }
-            print(output, "( ");
+            print(output, "(%s ", binaryName);
             print_expression(output, expression->binary.left);
-            print(output, " %s ", binaryName);
+            print(output, " ");
             print_expression(output, expression->binary.right);
-            print(output, " )");
+            print(output, ")");
         } break;
         
         INVALID_DEFAULT_CASE;
@@ -130,22 +173,22 @@ print_statement(FileStream *output, Statement *statement)
                 case Assign_Div : assignName = "/="; break;
                 INVALID_DEFAULT_CASE;
             }
-            println_begin(output, "( ");
+            println_begin(output, "(%s ", assignName);
             print_expression(output, statement->assign.left);
-            print(output, " %s ", assignName);
+            print(output, " ");
             print_expression(output, statement->assign.right);
-            println_end(output, " )");
+            println_end(output, ")");
         } break;
         
         case Stmt_Return: {
             if (statement->expression) {
-                println_begin(output, "( return ");
+                println_begin(output, "(return ");
                 print_expression(output, statement->expression);
-                println_end(output, " )");
+                println_end(output, ")");
             }
             else
             {
-                println(output, "( return )");
+                println(output, "(return)");
             }
         } break;
         

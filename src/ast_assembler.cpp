@@ -1,43 +1,25 @@
-enum AsmOperandKind
-{
-    AsmOperand_None,
-    AsmOperand_Register,
-    AsmOperand_FrameOffset,
-    AsmOperand_Immediate,
-    AsmOperand_Address,
-};
-
-struct AsmOperand
-{
-    AsmOperandKind kind;
-    union {
-        Register oRegister;
-        s64      oFrameOffset;
-        s64      oImmediate;
-        s64      oAddress;
-    };
-};
-
 #define emit_r_frame_offset(op, offset, dst) \
-if (((offset) >= S8_MIN) && ((offset) <= S8_MAX)) { \
+if (is_8bit(offset)) { \
 emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
 } else { \
-i_expect(((offset) >= S32_MIN) && ((offset) <= S32_MAX)); \
+i_expect(is_32bit(offset)); \
 emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
 }
 
 #define emit_x_frame_offset(op, offset) \
-if (((offset) >= S8_MIN) && ((offset) <= S8_MAX)) { \
+if (is_8bit(offset)) { \
 emit_x_mb(assembler, op, Reg_RBP, (offset)); \
 } else { \
-i_expect(((offset) >= S32_MIN) && ((offset) <= S32_MAX)); \
+i_expect(is_32bit(offset)); \
 emit_x_md(assembler, op, Reg_RBP, (offset)); \
 }
 
 internal void
 initialize_free_registers(Assembler *assembler)
 {
-    Register available_registers[] = {Reg_RCX, Reg_RBX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10, Reg_R11, Reg_R12, Reg_R13, Reg_R14, Reg_R15};
+    // NOTE(michiel): RAX/RDX are very volatile
+    //                RBX, R12-R15 are callee-saved, so try not to use them
+    Register available_registers[] = {Reg_RCX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10, Reg_R11};
     for (size_t i = 0; i < sizeof(available_registers) / sizeof(*available_registers); i++) {
         assembler->freeRegisterMask |= 1 << (available_registers[i] & 0xF);
     }
@@ -108,12 +90,9 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
     switch (operand->kind)
     {
         case AsmOperand_Immediate: { 
-            if ((operand->oImmediate >= S32_MIN) && (operand->oImmediate <= S32_MAX))
-            {
+            if (is_32bit(operand->oImmediate)) {
                 emit_r_i(assembler, movsx, targetReg, operand->oImmediate);
-            }
-            else
-            {
+            } else {
                 emit_mov64_r_i(assembler, targetReg, operand->oImmediate);
             }
         } break;
@@ -128,8 +107,7 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
         } break;
         
         case AsmOperand_Register: {
-            if (operand->oRegister != targetReg)
-            {
+            if (operand->oRegister != targetReg) {
                 emit_r_r(assembler, mov, targetReg, operand->oRegister);
             }
         } break;
@@ -202,7 +180,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     {
         if (src->kind == AsmOperand_Immediate)
         {
-            if ((src->oImmediate >= S32_MIN) && (src->oImmediate <= S32_MAX))
+            if (is_32bit(src->oImmediate))
             {
                 emit_r_i(assembler, movsx, dst->oRegister, src->oImmediate);
             }
@@ -228,10 +206,11 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else if (dst->kind == AsmOperand_FrameOffset)
     {
-        if ((dst->oFrameOffset >= S8_MIN) && (dst->oFrameOffset <= S8_MAX))
+        if (is_8bit(dst->oFrameOffset))
         {
             if (src->kind == AsmOperand_Immediate)
             {
+                i_expect(is_32bit(src->oImmediate));
                 emit_mb_i(assembler, movsx, Reg_RBP, dst->oFrameOffset, src->oImmediate);
             }
             else
@@ -242,9 +221,11 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            i_expect((dst->oFrameOffset >= S32_MIN) && (dst->oFrameOffset <= S32_MAX));
+            fprintf(stderr, "TEST %ld\n", dst->oFrameOffset);
+            i_expect(is_32bit(dst->oFrameOffset));
             if (src->kind == AsmOperand_Immediate)
             {
+                i_expect(is_32bit(src->oImmediate));
                 emit_md_i(assembler, movsx, Reg_RBP, dst->oFrameOffset, src->oImmediate);
             }
             else
@@ -259,6 +240,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         i_expect(dst->kind == AsmOperand_Address);
         if (src->kind == AsmOperand_Immediate)
         {
+            i_expect(is_32bit(src->oImmediate));
             emit_ripd_i(assembler, movsx, 0, src->oImmediate);
             patch_with_operand_address(assembler, 2, dst); // TODO(michiel): Check
         }
@@ -278,7 +260,7 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     {
         dst->oImmediate += src->oImmediate;
     }
-    else if ((dst->kind == AsmOperand_Immediate) && (dst->oImmediate >= S32_MIN) && (dst->oImmediate <= S32_MAX))
+    else if ((dst->kind == AsmOperand_Immediate) && is_32bit(dst->oImmediate))
     {
         ensure_operand_has_register(assembler, src);
         emit_r_i(assembler, add, src->oRegister, dst->oImmediate);
@@ -291,7 +273,11 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         switch (src->kind)
         {
             case AsmOperand_Immediate: {
-                if ((src->oImmediate >= S32_MIN) && (src->oImmediate <= S32_MAX))
+                if (is_8bit(src->oImmediate))
+                {
+                    emit_r_ib(assembler, add, dst->oRegister, src->oImmediate);
+                }
+                else if (is_32bit(src->oImmediate))
                 {
                     emit_r_i(assembler, add, dst->oRegister, src->oImmediate);
                 }
@@ -340,7 +326,11 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         switch (src->kind)
         {
             case AsmOperand_Immediate: {
-                if ((src->oImmediate >= S32_MIN) && (src->oImmediate <= S32_MAX))
+                if (is_8bit(src->oImmediate))
+                {
+                    emit_r_ib(assembler, sub, dst->oRegister, src->oImmediate);
+                }
+                else if (is_32bit(src->oImmediate))
                 {
                     emit_r_i(assembler, sub, dst->oRegister, src->oImmediate);
                 }
@@ -461,13 +451,19 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         } break;
         
         case Expr_Identifier: {
-            fprintf(stderr, "\nERRROROORROROROORRRR:\nMichiel moet dit nog doen...\n\n");
-            FileStream errors = {};
-            errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
-            print_expression(&errors, expression);
-            fprintf(stderr, "\n");
-            destination->kind = AsmOperand_Address;
-            destination->oAddress = 0x11223344;
+            AsmSymbol *symbol = find_symbol(assembler, expression->name);
+            if (symbol)
+            {
+                *destination = symbol->operand;
+            }
+            else
+            {
+                fprintf(stderr, "Identifier '%.*s' was not declared.\n", STR_FMT(expression->name));
+                //FileStream errors = {};
+                //errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
+                //print_expression(&errors, expression);
+                //fprintf(stderr, "\n");
+            }
         } break;
         
         case Expr_Unary: {
@@ -527,26 +523,42 @@ emit_statement(Assembler *assembler, Statement *statement)
     switch (statement->kind)
     {
         case Stmt_Assign: {
-            fprintf(stderr, "\nERRROROORROROROORRRR:\nMichiel moet dit nog doen...\n\n");
-            FileStream errors = {};
-            errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
-            print_statement(&errors, statement);
-            fprintf(stderr, "\n");
             AsmOperand destination = {};
             AsmOperand source = {};
-            emit_expression(assembler, statement->assign.left, &destination);
-            emit_expression(assembler, statement->assign.right, &source);
-            switch (statement->assign.op)
+            if (statement->assign.left->kind == Expr_Identifier)
             {
-                case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
-                case Assign_Add: { emit_add(assembler, &destination, &source); } break;
-                case Assign_Sub: { emit_sub(assembler, &destination, &source); } break;
-                case Assign_Mul: { emit_mul(assembler, &destination, &source); } break;
-                case Assign_Div: { emit_div(assembler, &destination, &source); } break;
-                INVALID_DEFAULT_CASE;
+                AsmSymbol *leftSym = find_symbol(assembler, statement->assign.left->name);
+                if (!leftSym)
+                {
+                    leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->assign.left->name);
+                }
+                i_expect(leftSym);
+                destination = leftSym->operand;
+                //emit_expression(assembler, statement->assign.left, &destination);
+                emit_expression(assembler, statement->assign.right, &source);
+                switch (statement->assign.op)
+                {
+                    case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
+                    case Assign_Add: { emit_add(assembler, &destination, &source); } break;
+                    case Assign_Sub: { emit_sub(assembler, &destination, &source); } break;
+                    case Assign_Mul: { emit_mul(assembler, &destination, &source); } break;
+                    case Assign_Div: { emit_div(assembler, &destination, &source); } break;
+                    INVALID_DEFAULT_CASE;
+                }
+                deallocate_operand(assembler, &destination);
+                deallocate_operand(assembler, &source);
             }
-            deallocate_operand(assembler, &destination);
-            deallocate_operand(assembler, &source);
+            else
+            {
+                fprintf(stderr, "Left side of assignment must be an identifier.\n");
+#if 0                
+                fprintf(stderr, "\nERRROROORROROROORRRR:\nMichiel moet dit nog doen...\n\n");
+                FileStream errors = {};
+                errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
+                print_statement(&errors, statement);
+                fprintf(stderr, "\n");
+#endif
+            }
         } break;
         
         case Stmt_Return: {
@@ -567,10 +579,12 @@ emit_statement(Assembler *assembler, Statement *statement)
 internal void
 emit_stmt_block(Assembler *assembler, StmtBlock *block)
 {
+    u32 localScopeAt = assembler->localCount;
     for (u32 stmtIdx = 0; stmtIdx < block->stmtCount; ++stmtIdx)
     {
         emit_statement(assembler, block->statements[stmtIdx]);
     }
+    assembler->localCount = localScopeAt;
 }
 
 internal umm
@@ -578,10 +592,12 @@ emit_function(Assembler *assembler, Function *function)
 {
     umm result = assembler->codeAt;
     
+    AsmSymbol *funcSymbol = create_global_sym(assembler, AsmSymbol_Func, function->name, result);
+    unused(funcSymbol);
+    
     // TODO(michiel): This preamble should be applied for bigger functions only, when Reg_RSP will be used...,
     // so to properly deal with this, this should be known by the AST itself.
     emit_push(assembler, Reg_EBP);
-    emit_r_r(assembler, mov, Reg_RBP, Reg_RSP);
     emit_stmt_block(assembler, function->body);
     
     return result;

@@ -116,16 +116,11 @@ struct Program
     Function *main;
 };
 
-struct VariableScope
-{
-    VariableScope *parent;
-    MemoryMap variables;
-};
-
 struct Ast
 {
     MemoryArena   arena;
     MemoryInterns interns;
+    
     Program program;
     //StmtList statements;
     //Expr *exprFreeList;

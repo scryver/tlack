@@ -356,8 +356,20 @@ void emit_##op##_r(Assembler *assembler) { \
 emit(assembler, code); \
 }
 
+#define OPERATION_2_R(op, code) \
+void emit_##op##_r(Assembler *assembler) { \
+emit(assembler, 0x0F); \
+emit(assembler, code); \
+}
+
 #define OPERATION_1_M(op, code) \
 void emit_##op##_m(Assembler *assembler) { \
+emit(assembler, code); \
+}
+
+#define OPERATION_2_M(op, code) \
+void emit_##op##_m(Assembler *assembler) { \
+emit(assembler, 0x0F); \
 emit(assembler, code); \
 }
 
@@ -398,10 +410,14 @@ emit(assembler, code | cond); \
 enum { Extension_##op##_C = extension };
 
 
+
 OPERATION_1_R(mov, OC_MovRMtoR)
 OPERATION_1_M(mov, OC_MovRtoRM)
-OPERATION_1_I(movsx, OC_MovItoRM, 0x00)
+OPERATION_1_I(movsx, OC_MovItoRM, 0x00)   // NOTE(michiel): Only sign extended from 32b imm -> 64b reg
+OPERATION_1_IB(mov, OC_MovI8toRM8, 0x00)
+OPERATION_2_R(movsxb, 0xBE)
 
+// NOTE(michiel): Variable shifts only with CL
 OPERATION_1_IB(shl, OC_RotShftRMbyI, 0x04)
 OPERATION_1_IB(shr, OC_RotShftRMbyI, 0x05)
 OPERATION_1_IB(sar, OC_RotShftRMbyI, 0x07)
@@ -409,34 +425,42 @@ OPERATION_1_IB(sar, OC_RotShftRMbyI, 0x07)
 OPERATION_1_R(add, OC_AddRMtoR)
 OPERATION_1_M(add, OC_AddRtoRM)
 OPERATION_1_I(add, OC_OpItoRM, 0x00)
+OPERATION_1_IB(add, OC_OpI8toRM, 0x00)
 
 OPERATION_1_R(or, OC_OrRMtoR)
 OPERATION_1_M(or, OC_OrRtoRM)
 OPERATION_1_I(or, OC_OpItoRM, 0x01)
+OPERATION_1_IB(or, OC_OpI8toRM, 0x01)
 
 OPERATION_1_R(adc, OC_AdcRMtoR)
 OPERATION_1_M(adc, OC_AdcRtoRM)
 OPERATION_1_I(adc, OC_OpItoRM, 0x02)
+OPERATION_1_IB(adc, OC_OpI8toRM, 0x02)
 
 OPERATION_1_R(sbb, OC_SbbRMtoR)
 OPERATION_1_M(sbb, OC_SbbRtoRM)
 OPERATION_1_I(sbb, OC_OpItoRM, 0x03)
+OPERATION_1_IB(sbb, OC_OpI8toRM, 0x03)
 
 OPERATION_1_R(and, OC_AndRMtoR)
 OPERATION_1_M(and, OC_AndRtoRM)
 OPERATION_1_I(and, OC_OpItoRM, 0x04)
+OPERATION_1_IB(and, OC_OpI8toRM, 0x04)
 
 OPERATION_1_R(sub, OC_SubRMtoR)
 OPERATION_1_M(sub, OC_SubRtoRM)
 OPERATION_1_I(sub, OC_OpItoRM, 0x05)
+OPERATION_1_IB(sub, OC_OpI8toRM, 0x05)
 
 OPERATION_1_R(xor, OC_XorRMtoR)
 OPERATION_1_M(xor, OC_XorRtoRM)
 OPERATION_1_I(xor, OC_OpItoRM, 0x06)
+OPERATION_1_IB(xor, OC_OpI8toRM, 0x06)
 
 OPERATION_1_R(cmp, OC_CmpRMtoR)
 OPERATION_1_M(cmp, OC_CmpRtoRM)
 OPERATION_1_I(cmp, OC_OpItoRM, 0x07)
+OPERATION_1_IB(cmp, OC_OpI8toRM, 0x07)
 
 OPERATION_1_X(mul, OC_IntArith, 0x04)
 OPERATION_1_X(imul, OC_IntArith, 0x05)
@@ -455,6 +479,29 @@ OPERATION_2_C_R(set, 0x90, 0x00)
 
 OPERATION_1_C_IB(j, 0x70)
 OPERATION_2_C_I(j, 0x80)
+
+#if 0
+// NOTE(michiel): This produces 7-bytes of instructions, a 32 bit immediate with a simple movsx
+// will also produces 7-bytes of instructions. The main difference is that this emits 2 opcodes,
+// and the 32 bit variant a single opcode.
+internal void
+emit_mov64_r_ib(Assembler *assembler, Register reg, s64 value)
+{
+    i_expect(is_8bit(value));
+    emit_r_ib(assembler, mov, (Register)((reg & 0xF) | Reg_AL), value);
+    emit_r_r(assembler, movsxb, reg, reg);
+}
+#endif
+
+internal void
+emit_mov32_r_i(Assembler *assembler, Register reg, s64 value)
+{
+    i_expect(is_32bit_unsigned(value));
+    if (reg >= Reg_RAX) {
+        reg = (Register)((reg & 0xF) | Reg_EAX);
+    }
+    emit_r_i(assembler, movsx, reg, value);
+}
 
 internal void
 emit_push(Assembler *assembler, Register reg)

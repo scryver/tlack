@@ -1,0 +1,35 @@
+ast :=  program
+
+program    := function 'main'
+
+function   := stmt_block
+
+stmt_block := statement*
+
+statement  := assignment
+            | return
+
+assignment := assign_op NAME expr
+assign_op  := Assign_Set
+            | Assign_Add
+            | Assign_Sub
+            | Assign_Mul
+            | Assign_Div
+
+return     := expr?
+
+expr       := INT64
+            | NAME
+            | unary
+            | binary
+
+unary      := unary_op expr
+unary_op   := Unary_Minus
+            | Unary_Flip
+            | Unary_Not
+
+binary     := binary_op expr expr
+binary_op  := Binary_Add
+            | Binary_Sub
+            | Binary_Mul
+            | Binary_Div
