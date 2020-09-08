@@ -132,6 +132,7 @@ print_expression(FileStream *output, Expression *expression)
                 case Binary_Sub : binaryName = "-"; break;
                 case Binary_Mul : binaryName = "*"; break;
                 case Binary_Div : binaryName = "/"; break;
+                case Binary_Mod : binaryName = "%"; break;
                 INVALID_DEFAULT_CASE;
             }
             print(output, "(%s ", binaryName);
@@ -159,6 +160,7 @@ print_statement(FileStream *output, Statement *statement)
                 case Assign_Sub : assignName = "-="; break;
                 case Assign_Mul : assignName = "*="; break;
                 case Assign_Div : assignName = "/="; break;
+                case Assign_Mod : assignName = "%="; break;
                 INVALID_DEFAULT_CASE;
             }
             println_begin(output, "(%s ", assignName);

@@ -41,6 +41,7 @@ graph_ast_expression(Ast *ast, FileStream *output, Expression *expression, Strin
                 case Binary_Sub: { graph_label(output, opStr, "-"); } break;
                 case Binary_Mul: { graph_label(output, opStr, "*"); } break;
                 case Binary_Div: { graph_label(output, opStr, "/"); } break;
+                case Binary_Mod: { graph_label(output, opStr, "%"); } break;
                 INVALID_DEFAULT_CASE;
             }
             graph_connect(output, connection, opStr);
@@ -67,6 +68,7 @@ graph_ast_statement(Ast *ast, FileStream *output, Statement *statement, String c
                 case Assign_Sub : { graph_label(output, assignStr, "-="); } break;
                 case Assign_Mul : { graph_label(output, assignStr, "*="); } break;
                 case Assign_Div : { graph_label(output, assignStr, "/="); } break;
+                case Assign_Mod : { graph_label(output, assignStr, "%="); } break;
                 INVALID_DEFAULT_CASE;
             }
             graph_connect(output, connection, assignStr);

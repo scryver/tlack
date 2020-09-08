@@ -68,7 +68,7 @@ parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
     SourcePos origin = tokenizer->origin;
     Expression *left = parse_unary(tokenizer, ast);
     Token token = peek_token(tokenizer);
-    while ((token.kind == Token_Multiply) || (token.kind == Token_Divide))
+    while ((token.kind == Token_Multiply) || (token.kind == Token_Divide) || (token.kind == Token_Modulus))
     {
         expect_token(tokenizer, token.kind);
         
@@ -77,14 +77,17 @@ parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
         if (token.kind == Token_Multiply)
         {
             left = create_binary_expr(ast, Binary_Mul, left, right);
-            left->origin = origin;
+        }
+        else if (token.kind == Token_Divide)
+        {
+            left = create_binary_expr(ast, Binary_Div, left, right);
         }
         else
         {
-            i_expect(token.kind == Token_Divide);
-            left = create_binary_expr(ast, Binary_Div, left, right);
-            left->origin = origin;
+            i_expect(token.kind == Token_Modulus);
+            left = create_binary_expr(ast, Binary_Mod, left, right);
         }
+        left->origin = origin;
         
         token = peek_token(tokenizer);
     }
@@ -143,6 +146,7 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
             case Token_SubAssign: { opType = Assign_Sub; } break;
             case Token_MulAssign: { opType = Assign_Mul; } break;
             case Token_DivAssign: { opType = Assign_Div; } break;
+            case Token_ModAssign: { opType = Assign_Mod; } break;
             INVALID_DEFAULT_CASE;
         }
         Expression *right = parse_expression(tokenizer, ast);

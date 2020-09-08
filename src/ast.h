@@ -36,6 +36,7 @@ enum BinaryOpType
     Binary_Sub,
     Binary_Mul,
     Binary_Div,
+    Binary_Mod,
 };
 struct BinaryOp
 {
@@ -73,6 +74,7 @@ enum AssignOpType
     Assign_Sub,
     Assign_Mul,
     Assign_Div,
+    Assign_Mod,
 };
 struct Assignment
 {

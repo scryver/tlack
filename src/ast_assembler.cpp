@@ -25,18 +25,18 @@ ast_assemble_error(SourcePos origin, char *fmt, ...)
 
 #define emit_r_frame_offset(op, offset, dst) \
 if (is_8bit(offset)) { \
-    emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
+emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
 } else { \
-    i_expect(is_32bit(offset)); \
-    emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
+i_expect(is_32bit(offset)); \
+emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
 }
 
 #define emit_x_frame_offset(op, offset) \
 if (is_8bit(offset)) { \
-    emit_x_mb(assembler, op, Reg_RBP, (offset)); \
+emit_x_mb(assembler, op, Reg_RBP, (offset)); \
 } else { \
-    i_expect(is_32bit(offset)); \
-    emit_x_md(assembler, op, Reg_RBP, (offset)); \
+i_expect(is_32bit(offset)); \
+emit_x_md(assembler, op, Reg_RBP, (offset)); \
 }
 
 internal void
@@ -407,17 +407,17 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         
         if (src->kind == AsmOperand_FrameOffset)
         {
-            emit_x_frame_offset(mul, src->oFrameOffset);
+            emit_x_frame_offset(imul, src->oFrameOffset);
         }
         else if (src->kind == AsmOperand_Address)
         {
-            emit_x_ripd(assembler, mul, 0);
+            emit_x_ripd(assembler, imul, 0);
             patch_with_operand_address(assembler, 1, src);
         }
         else
         {
             ensure_operand_has_register(assembler, src);
-            emit_x_r(assembler, mul, src->oRegister);
+            emit_x_r(assembler, imul, src->oRegister);
         }
         
         AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
@@ -439,26 +439,64 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
-        b32 signedDiv = false;
-        emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
+        b32 signedDiv = true;
         emit_operand_to_register(assembler, dst, Reg_RAX);
+        emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
         
         if (src->kind == AsmOperand_FrameOffset)
         {
-            emit_x_frame_offset(div, src->oFrameOffset);
+            emit_x_frame_offset(idiv, src->oFrameOffset);
         }
         else if (src->kind == AsmOperand_Address)
         {
-            emit_x_ripd(assembler, div, 0);
+            emit_x_ripd(assembler, idiv, 0);
             patch_with_operand_address(assembler, 1, src);
         }
         else
         {
             ensure_operand_has_register(assembler, src);
-            emit_x_r(assembler, div, src->oRegister);
+            emit_x_r(assembler, idiv, src->oRegister);
         }
         
         AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
+        emit_mov(assembler, dst, &source);
+    }
+}
+
+internal void
+emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
+{
+    if ((dst->kind == AsmOperand_Immediate) && (src->kind == AsmOperand_Immediate))
+    {
+        dst->oImmediate %= src->oImmediate;
+    }
+    else if ((src->kind == AsmOperand_Immediate) && is_pow2(src->oImmediate))
+    {
+        ensure_operand_has_register(assembler, dst);
+        emit_r_ib(assembler, and, dst->oRegister, src->oImmediate - 1);
+    }
+    else
+    {
+        b32 signedDiv = true;
+        emit_operand_to_register(assembler, dst, Reg_RAX);
+        emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
+        
+        if (src->kind == AsmOperand_FrameOffset)
+        {
+            emit_x_frame_offset(idiv, src->oFrameOffset);
+        }
+        else if (src->kind == AsmOperand_Address)
+        {
+            emit_x_ripd(assembler, idiv, 0);
+            patch_with_operand_address(assembler, 1, src);
+        }
+        else
+        {
+            ensure_operand_has_register(assembler, src);
+            emit_x_r(assembler, idiv, src->oRegister);
+        }
+        
+        AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RDX };
         emit_mov(assembler, dst, &source);
     }
 }
@@ -478,7 +516,9 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
             AsmSymbol *symbol = find_symbol(assembler, expression->name);
             if (symbol)
             {
+                // NOTE(michiel): Identifiers in expression are always kept in registers
                 *destination = symbol->operand;
+                ensure_operand_has_register(assembler, destination);
             }
             else
             {
@@ -532,6 +572,10 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
                     emit_div(assembler, destination, &rightOp);
                 } break;
                 
+                case Binary_Mod: {
+                    emit_mod(assembler, destination, &rightOp);
+                } break;
+                
                 INVALID_DEFAULT_CASE;
             }
             deallocate_operand(assembler, &rightOp);
@@ -568,6 +612,7 @@ emit_statement(Assembler *assembler, Statement *statement)
                     case Assign_Sub: { emit_sub(assembler, &destination, &source); } break;
                     case Assign_Mul: { emit_mul(assembler, &destination, &source); } break;
                     case Assign_Div: { emit_div(assembler, &destination, &source); } break;
+                    case Assign_Mod: { emit_mod(assembler, &destination, &source); } break;
                     INVALID_DEFAULT_CASE;
                 }
                 
