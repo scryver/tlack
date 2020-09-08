@@ -282,6 +282,10 @@ s32 main(s32 argc, char **argv)
         u64 x = func();
         gFileApi->write_fmt_to_file(&printStream.file, "Got 0x%016lX | %ld\n", x, x);
     }
+    else
+    {
+        fprintf(stderr, "Failed to make it executable\n");
+    }
     
     return 0;
 }

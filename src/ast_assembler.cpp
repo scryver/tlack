@@ -25,18 +25,18 @@ ast_assemble_error(SourcePos origin, char *fmt, ...)
 
 #define emit_r_frame_offset(op, offset, dst) \
 if (is_8bit(offset)) { \
-emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
+    emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
 } else { \
-i_expect(is_32bit(offset)); \
-emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
+    i_expect(is_32bit(offset)); \
+    emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
 }
 
 #define emit_x_frame_offset(op, offset) \
 if (is_8bit(offset)) { \
-emit_x_mb(assembler, op, Reg_RBP, (offset)); \
+    emit_x_mb(assembler, op, Reg_RBP, (offset)); \
 } else { \
-i_expect(is_32bit(offset)); \
-emit_x_md(assembler, op, Reg_RBP, (offset)); \
+    i_expect(is_32bit(offset)); \
+    emit_x_md(assembler, op, Reg_RBP, (offset)); \
 }
 
 internal void
@@ -420,8 +420,8 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             emit_x_r(assembler, mul, src->oRegister);
         }
         
-        allocate_operand_register(assembler, dst);
-        emit_r_r(assembler, mov, dst->oRegister, Reg_RAX);
+        AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
+        emit_mov(assembler, dst, &source);
     }
 }
 
@@ -458,8 +458,8 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             emit_x_r(assembler, div, src->oRegister);
         }
         
-        allocate_operand_register(assembler, dst);
-        emit_r_r(assembler, mov, dst->oRegister, Reg_RAX);
+        AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
+        emit_mov(assembler, dst, &source);
     }
 }
 
@@ -559,6 +559,7 @@ emit_statement(Assembler *assembler, Statement *statement)
                 i_expect(leftSym);
                 destination = leftSym->operand;
                 //emit_expression(assembler, statement->assign.left, &destination);
+                AsmOperand origDest = destination;
                 emit_expression(assembler, statement->assign.right, &source);
                 switch (statement->assign.op)
                 {
@@ -569,6 +570,12 @@ emit_statement(Assembler *assembler, Statement *statement)
                     case Assign_Div: { emit_div(assembler, &destination, &source); } break;
                     INVALID_DEFAULT_CASE;
                 }
+                
+                if (destination.kind != origDest.kind)
+                {
+                    emit_mov(assembler, &origDest, &destination);
+                }
+                
                 deallocate_operand(assembler, &destination);
                 deallocate_operand(assembler, &source);
             }
