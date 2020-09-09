@@ -70,19 +70,17 @@ deallocate_register(Assembler *assembler, Register oldReg) {
 internal void
 allocate_operand_register(Assembler *assembler, AsmOperand *operand)
 {
-    if (operand->kind != AsmOperand_Register)
-    {
-        operand->kind = AsmOperand_Register;
-        operand->oRegister = allocate_register(assembler);
-    }
+    i_expect(operand->kind == AsmOperand_None);
+    operand->kind = AsmOperand_Register;
+    operand->oRegister = allocate_register(assembler);
 }
 
 internal void
 steal_operand_register(Assembler *assembler, AsmOperand *source, AsmOperand *dest)
 {
-    i_expect(source->kind == AsmOperand_Register);
-    i_expect(dest->kind != AsmOperand_Register);
-    dest->kind = AsmOperand_Register;
+    i_expect((source->kind == AsmOperand_Register) || (source->kind == AsmOperand_LockedRegister));
+    i_expect((dest->kind != AsmOperand_Register) && (dest->kind != AsmOperand_LockedRegister));
+    dest->kind = source->kind;
     dest->oRegister = source->oRegister;
     source->kind = AsmOperand_None;
 }
@@ -131,6 +129,7 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
             patch_with_operand_address(assembler, 1, operand);
         } break;
         
+        case AsmOperand_LockedRegister:
         case AsmOperand_Register: {
             if (operand->oRegister != targetReg) {
                 emit_r_r(assembler, mov, targetReg, operand->oRegister);
@@ -141,10 +140,25 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
     }
 }
 
+// NOTE(michiel): This will copy the register if it is a locked one
 internal void
-ensure_operand_has_register(Assembler *assembler, AsmOperand *operand)
+ensure_operand_has_register_for_dst(Assembler *assembler, AsmOperand *operand)
 {
     if (operand->kind != AsmOperand_Register)
+    {
+        Register operandReg = allocate_register(assembler);
+        emit_operand_to_register(assembler, operand, operandReg);
+        operand->kind = AsmOperand_Register;
+        operand->oRegister = operandReg;
+    }
+}
+
+// NOTE(michiel): This will not copy the register if it is a locked one
+internal void
+ensure_operand_has_register_for_src(Assembler *assembler, AsmOperand *operand)
+{
+    if ((operand->kind != AsmOperand_Register) &&
+        (operand->kind != AsmOperand_LockedRegister))
     {
         Register operandReg = allocate_register(assembler);
         emit_operand_to_register(assembler, operand, operandReg);
@@ -162,7 +176,7 @@ emit_neg(Assembler *assembler, AsmOperand *operand)
     }
     else
     {
-        ensure_operand_has_register(assembler, operand);
+        ensure_operand_has_register_for_dst(assembler, operand);
         emit_x_r(assembler, neg, operand->oRegister);
     }
 }
@@ -176,7 +190,7 @@ emit_not(Assembler *assembler, AsmOperand *operand)
     }
     else
     {
-        ensure_operand_has_register(assembler, operand);
+        ensure_operand_has_register_for_dst(assembler, operand);
         emit_x_r(assembler, not, operand->oRegister);
     }
 }
@@ -190,7 +204,7 @@ emit_logical_not(Assembler *assembler, AsmOperand *operand)
     }
     else
     {
-        ensure_operand_has_register(assembler, operand);
+        ensure_operand_has_register_for_dst(assembler, operand);
         emit_r_i(assembler, cmp, operand->oRegister, 0);
         emit_r_r(assembler, xor, operand->oRegister, operand->oRegister);
         emit_c_r(assembler, set, CC_Equal, operand->oRegister);
@@ -201,8 +215,10 @@ internal void
 emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
 {
     i_expect(dst->kind != AsmOperand_Immediate);
-    if (dst->kind == AsmOperand_Register)
+    if ((dst->kind == AsmOperand_Register) ||
+        (dst->kind == AsmOperand_LockedRegister))
     {
+        ensure_operand_has_register_for_dst(assembler, dst);
         if (src->kind == AsmOperand_Immediate)
         {
             if (is_32bit(src->oImmediate))
@@ -225,7 +241,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            i_expect(src->kind == AsmOperand_Register);
+            i_expect((src->kind == AsmOperand_Register) || (src->kind == AsmOperand_LockedRegister));
             emit_r_r(assembler, mov, dst->oRegister, src->oRegister);
         }
     }
@@ -240,7 +256,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             }
             else
             {
-                ensure_operand_has_register(assembler, src);
+                ensure_operand_has_register_for_src(assembler, src);
                 emit_mb_r(assembler, mov, Reg_RBP, dst->oFrameOffset, src->oRegister);
             }
         }
@@ -254,7 +270,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             }
             else
             {
-                ensure_operand_has_register(assembler, src);
+                ensure_operand_has_register_for_src(assembler, src);
                 emit_md_r(assembler, mov, Reg_RBP, dst->oFrameOffset, src->oRegister);
             }
         }
@@ -270,7 +286,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            ensure_operand_has_register(assembler, src);
+            ensure_operand_has_register_for_src(assembler, src);
             emit_ripd_r(assembler, mov, 0, src->oRegister);
             patch_with_operand_address(assembler, 1, dst);
         }
@@ -286,13 +302,13 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else if ((dst->kind == AsmOperand_Immediate) && is_32bit(dst->oImmediate))
     {
-        ensure_operand_has_register(assembler, src);
+        ensure_operand_has_register_for_dst(assembler, src);
         emit_r_i(assembler, add, src->oRegister, dst->oImmediate);
         steal_operand_register(assembler, src, dst);
     }
     else
     {
-        ensure_operand_has_register(assembler, dst);
+        ensure_operand_has_register_for_dst(assembler, dst);
         
         switch (src->kind)
         {
@@ -307,7 +323,7 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
                 }
                 else
                 {
-                    ensure_operand_has_register(assembler, src);
+                    ensure_operand_has_register_for_src(assembler, src);
                     emit_r_r(assembler, add, dst->oRegister, src->oRegister);
                 }
             } break;
@@ -321,6 +337,7 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
                 patch_with_operand_address(assembler, 1, src);
             } break;
             
+            case AsmOperand_LockedRegister:
             case AsmOperand_Register: {
                 emit_r_r(assembler, add, dst->oRegister, src->oRegister);
             } break;
@@ -345,7 +362,7 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     //}
     else
     {
-        ensure_operand_has_register(assembler, dst);
+        ensure_operand_has_register_for_dst(assembler, dst);
         
         switch (src->kind)
         {
@@ -360,7 +377,7 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
                 }
                 else
                 {
-                    ensure_operand_has_register(assembler, src);
+                    ensure_operand_has_register_for_src(assembler, src);
                     emit_r_r(assembler, sub, dst->oRegister, src->oRegister);
                 }
             } break;
@@ -374,6 +391,7 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
                 patch_with_operand_address(assembler, 1, src);
             } break;
             
+            case AsmOperand_LockedRegister:
             case AsmOperand_Register: {
                 emit_r_r(assembler, sub, dst->oRegister, src->oRegister);
             } break;
@@ -392,12 +410,12 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else if ((src->kind == AsmOperand_Immediate) && is_pow2(src->oImmediate))
     {
-        ensure_operand_has_register(assembler, dst);
+        ensure_operand_has_register_for_dst(assembler, dst);
         emit_r_ib(assembler, shl, dst->oRegister, log2(src->oImmediate));
     }
     else if ((dst->kind == AsmOperand_Immediate) && is_pow2(dst->oImmediate))
     {
-        ensure_operand_has_register(assembler, src);
+        ensure_operand_has_register_for_dst(assembler, src);
         emit_r_ib(assembler, shl, src->oRegister, log2(dst->oImmediate));
         steal_operand_register(assembler, src, dst);
     }
@@ -416,11 +434,17 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            ensure_operand_has_register(assembler, src);
+            ensure_operand_has_register_for_src(assembler, src);
             emit_x_r(assembler, imul, src->oRegister);
         }
         
         AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
+        if (dst->kind != AsmOperand_Register)
+        {
+            Register dstReg = allocate_register(assembler);
+            dst->kind = AsmOperand_Register;
+            dst->oRegister = dstReg;
+        }
         emit_mov(assembler, dst, &source);
     }
 }
@@ -434,7 +458,7 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else if ((src->kind == AsmOperand_Immediate) && is_pow2(src->oImmediate))
     {
-        ensure_operand_has_register(assembler, dst);
+        ensure_operand_has_register_for_dst(assembler, dst);
         emit_r_ib(assembler, shr, dst->oRegister, log2(src->oImmediate));
     }
     else
@@ -454,11 +478,17 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            ensure_operand_has_register(assembler, src);
+            ensure_operand_has_register_for_dst(assembler, src);
             emit_x_r(assembler, idiv, src->oRegister);
         }
         
         AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RAX };
+        if (dst->kind != AsmOperand_Register)
+        {
+            Register dstReg = allocate_register(assembler);
+            dst->kind = AsmOperand_Register;
+            dst->oRegister = dstReg;
+        }
         emit_mov(assembler, dst, &source);
     }
 }
@@ -472,7 +502,8 @@ emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else if ((src->kind == AsmOperand_Immediate) && is_pow2(src->oImmediate))
     {
-        ensure_operand_has_register(assembler, dst);
+        // TODO(michiel): emit_ripd_ib / emit_mb_ib / emit_md_id
+        ensure_operand_has_register_for_dst(assembler, dst);
         emit_r_ib(assembler, and, dst->oRegister, src->oImmediate - 1);
     }
     else
@@ -492,11 +523,17 @@ emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else
         {
-            ensure_operand_has_register(assembler, src);
+            ensure_operand_has_register_for_src(assembler, src);
             emit_x_r(assembler, idiv, src->oRegister);
         }
         
         AsmOperand source = { .kind = AsmOperand_Register, .oRegister = Reg_RDX };
+        if (dst->kind != AsmOperand_Register)
+        {
+            Register dstReg = allocate_register(assembler);
+            dst->kind = AsmOperand_Register;
+            dst->oRegister = dstReg;
+        }
         emit_mov(assembler, dst, &source);
     }
 }
@@ -517,8 +554,15 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
             if (symbol)
             {
                 // NOTE(michiel): Identifiers in expression are always kept in registers
-                *destination = symbol->operand;
-                ensure_operand_has_register(assembler, destination);
+                if (symbol->loadedRegister != Reg_None)
+                {
+                    destination->kind = AsmOperand_LockedRegister;
+                    destination->oRegister = symbol->loadedRegister;
+                }
+                else
+                {
+                    *destination = symbol->operand;
+                }
             }
             else
             {
@@ -585,25 +629,47 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
     }
 }
 
-internal void
-emit_statement(Assembler *assembler, Statement *statement)
+internal AsmStatementResult
+emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult prevResult)
 {
+    AsmStatementResult result = {};
     switch (statement->kind)
     {
         case Stmt_Assign: {
-            AsmOperand destination = {};
-            AsmOperand source = {};
             if (statement->assign.left->kind == Expr_Identifier)
             {
+                AsmOperand destination = {};
+                AsmOperand source = {};
                 AsmSymbol *leftSym = find_symbol(assembler, statement->assign.left->name);
                 if (!leftSym)
                 {
                     leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->assign.left->name);
                 }
                 i_expect(leftSym);
-                destination = leftSym->operand;
+                
+                AsmOperand origDest = leftSym->operand;
+                if (prevResult.symbol)
+                {
+                    // NOTE(michiel): We had a previous result, if this is not to the same variable,
+                    // than write out the previous result. Otherwise reuse the result register.
+                    if (prevResult.symbol == leftSym)
+                    {
+                        destination = prevResult.result;
+                    }
+                    else
+                    {
+                        emit_mov(assembler, &prevResult.original, &prevResult.result);
+                        deallocate_operand(assembler, &prevResult.result);
+                        prevResult.symbol->loadedRegister = Reg_None;
+                        destination = leftSym->operand;
+                    }
+                }
+                else
+                {
+                    destination = leftSym->operand;
+                }
+                
                 //emit_expression(assembler, statement->assign.left, &destination);
-                AsmOperand origDest = destination;
                 emit_expression(assembler, statement->assign.right, &source);
                 switch (statement->assign.op)
                 {
@@ -616,12 +682,22 @@ emit_statement(Assembler *assembler, Statement *statement)
                     INVALID_DEFAULT_CASE;
                 }
                 
-                if (destination.kind != origDest.kind)
+                if (origDest != destination)
                 {
-                    emit_mov(assembler, &origDest, &destination);
+                    result.symbol = leftSym;
+                    result.original = origDest;
+                    result.result = destination;
+                    if (destination.kind == AsmOperand_Register)
+                    {
+                        result.symbol->loadedRegister = destination.oRegister;
+                    }
+                    else
+                    {
+                        i_expect(destination.kind != AsmOperand_LockedRegister);
+                        result.symbol->loadedRegister = Reg_None;
+                    }
                 }
                 
-                deallocate_operand(assembler, &destination);
                 deallocate_operand(assembler, &source);
             }
             else
@@ -639,10 +715,24 @@ emit_statement(Assembler *assembler, Statement *statement)
         
         case Stmt_Return: {
             AsmOperand destination = {};
-            if (statement->expression) {
-                emit_expression(assembler, statement->expression, &destination);
+            
+            Expression *expr = statement->expression;
+            if (expr)
+            {
+                emit_expression(assembler, expr, &destination);
                 emit_operand_to_register(assembler, &destination, Reg_RAX);
             }
+            
+            // NOTE(michiel): Most of the time we return something that has been calculated just before, so
+            // this mov after the return expression will make sure the return expression can used the cached
+            // register value of the previous line.
+            if (prevResult.symbol)
+            {
+                emit_mov(assembler, &prevResult.original, &prevResult.result);
+                deallocate_operand(assembler, &prevResult.result);
+                prevResult.symbol->loadedRegister = Reg_None;
+            }
+            
             emit_pop(assembler, Reg_EBP);
             emit_ret(assembler);
             deallocate_operand(assembler, &destination);
@@ -650,15 +740,24 @@ emit_statement(Assembler *assembler, Statement *statement)
         
         INVALID_DEFAULT_CASE;
     }
+    
+    return result;
 }
 
 internal void
 emit_stmt_block(Assembler *assembler, StmtBlock *block)
 {
     u32 localScopeAt = assembler->localCount;
+    AsmStatementResult prevResult = {};
     for (u32 stmtIdx = 0; stmtIdx < block->stmtCount; ++stmtIdx)
     {
-        emit_statement(assembler, block->statements[stmtIdx]);
+        prevResult = emit_statement(assembler, block->statements[stmtIdx], prevResult);
+    }
+    if (prevResult.original.kind != AsmOperand_None)
+    {
+        emit_mov(assembler, &prevResult.original, &prevResult.result);
+        deallocate_operand(assembler, &prevResult.result);
+        prevResult.symbol->loadedRegister = Reg_None;
     }
     assembler->localCount = localScopeAt;
 }

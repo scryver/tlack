@@ -1,6 +1,7 @@
 enum AsmOperandKind
 {
     AsmOperand_None,
+    AsmOperand_LockedRegister, // NOTE(michiel): Borrowed allocation
     AsmOperand_Register,
     AsmOperand_FrameOffset,
     AsmOperand_Immediate,
@@ -18,6 +19,22 @@ struct AsmOperand
     };
 };
 
+internal b32
+operator ==(AsmOperand &a, AsmOperand &b)
+{
+    b32 result = ((a.kind == b.kind) &&
+                  (a.oAddress == b.oAddress)); // TODO(michiel): Keep an eye on this one
+    return result;
+}
+
+internal b32
+operator !=(AsmOperand &a, AsmOperand &b)
+{
+    b32 result = ((a.kind != b.kind) ||
+                  (a.oAddress != b.oAddress)); // TODO(michiel): Keep an eye on this one
+    return result;
+}
+
 enum AsmSymbolKind
 {
     AsmSymbol_None,
@@ -28,8 +45,16 @@ enum AsmSymbolKind
 struct AsmSymbol
 {
     AsmSymbolKind kind;
+    Register loadedRegister;
     String name;
     AsmOperand operand; // NOTE(michiel): FrameOffset or Address (maybe Immediate for const later on?)
+};
+
+struct AsmStatementResult
+{
+    AsmSymbol *symbol;
+    AsmOperand original;
+    AsmOperand result;
 };
 
 #define MAX_GLOBAL_SYMBOLS  1024

@@ -270,10 +270,13 @@ s32 main(s32 argc, char **argv)
     
     graph_ast(&mainAst, "mainast.dot");
     
+    u32 freeRegs = assembler->freeRegisterMask;
     u64 callAddress = assembler->codeAt;
     fprintf(stderr, "Code at: 0x%016lX | %lu\n", callAddress, callAddress);
     emit_program(assembler, &mainAst.program);
     dump_code(assembler, string("test.bin"));
+    
+    i_expect(freeRegs == assembler->freeRegisterMask);
     
     // NOTE(michiel): Offset at least 64 bytes less than where the code starts. (sizeof(LinuxMemoryBlock))
     if (1 && make_executable(assembler->codeData, 4000))

@@ -1,10 +1,12 @@
 func main()
 {
+    hallo = 4;
     test = 0x1234;
     test *= -8;
-//    test = test % 15;
-    test %= 15;
+    test = test % 15;
+    test %= hallo;
     test %= 16;
-    return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2;
+    return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
 }
+
 
