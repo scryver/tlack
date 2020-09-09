@@ -421,6 +421,7 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
+        // TODO(michiel): Find a way to reuse rax/rdx or spill registers (maybe needed later on)
         emit_operand_to_register(assembler, dst, Reg_RAX);
         
         if (src->kind == AsmOperand_FrameOffset)
@@ -463,6 +464,7 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
+        // TODO(michiel): Find a way to reuse rax/rdx or spill registers (maybe needed later on)
         b32 signedDiv = true;
         emit_operand_to_register(assembler, dst, Reg_RAX);
         emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
@@ -508,6 +510,7 @@ emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
+        // TODO(michiel): Find a way to reuse rax/rdx or spill registers (maybe needed later on)
         b32 signedDiv = true;
         emit_operand_to_register(assembler, dst, Reg_RAX);
         emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
