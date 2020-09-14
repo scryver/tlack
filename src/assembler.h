@@ -1,3 +1,5 @@
+struct AsmSymbol;
+
 enum AsmOperandKind
 {
     AsmOperand_None,
@@ -11,6 +13,7 @@ enum AsmOperandKind
 struct AsmOperand
 {
     AsmOperandKind kind;
+    AsmSymbol *symbol;         // NOTE(michiel): Can be 0
     union {
         Register oRegister;
         s64      oFrameOffset;
@@ -59,6 +62,7 @@ struct AsmStatementResult
 
 #define MAX_GLOBAL_SYMBOLS  1024
 #define MAX_LOCAL_SYMBOLS   1024
+#define MAX_REGISTERS         32 // TODO(michiel): Jup, should not be done like this
 
 struct Assembler
 {
@@ -73,6 +77,7 @@ struct Assembler
     Buffer codeData;
     umm codeAt;
     
+    AsmOperand *registerUsage[MAX_REGISTERS]; // NOTE(michiel): Only valid when bit in freeRegisterMask is not set
     u32 freeRegisterMask;
 };
 

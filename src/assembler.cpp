@@ -63,6 +63,7 @@ create_global_sym(Assembler *assembler, AsmSymbolKind kind, String name, umm add
     result->kind = kind;
     result->name = name;
     result->operand.kind = AsmOperand_Address;
+    result->operand.symbol = result;
     result->operand.oAddress = address;
     
     mmap_put(&assembler->globalMap, result->name.data, result);
@@ -78,6 +79,7 @@ create_local_sym(Assembler *assembler, AsmSymbolKind kind, String name)
     result->kind = kind;
     result->name = name;
     result->operand.kind = AsmOperand_FrameOffset;
+    result->operand.symbol = result;
     result->operand.oFrameOffset = -8 * (s64)assembler->localCount;
     return result;
 }

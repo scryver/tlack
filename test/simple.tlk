@@ -3,9 +3,11 @@ func main()
     hallo = 4;
     test = 0x1234;
     test *= -8;
-    test = test % 15;
-    test %= hallo;
-    test %= 16;
+    test -= 23;
+    test = test % 15;  // Note that this will create an unnecessary xchg if the test value was already in a register
+    test %= hallo;     // (((0x1234 * -8) - 23) % 15) % hallo
+    hallo = 4 + test;
+    test %= 16 * hallo;
     test = test + test - test * test / test % 2;
     return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
 }

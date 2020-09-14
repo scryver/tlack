@@ -276,6 +276,7 @@ s32 main(s32 argc, char **argv)
     emit_program(assembler, &mainAst.program);
     dump_code(assembler, string("test.bin"));
     
+    fprintf(stderr, "0x%08X == 0x%08X\n", freeRegs, assembler->freeRegisterMask);
     i_expect(freeRegs == assembler->freeRegisterMask);
     
     // NOTE(michiel): Offset at least 64 bytes less than where the code starts. (sizeof(LinuxMemoryBlock))
