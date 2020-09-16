@@ -125,6 +125,8 @@ enum ConditionCodesEnum
     CC_GreaterOrEqual  = CC_NotLess,
     CC_LessOrEqual     = CC_NotGreater,
     CC_NotLessOrEqual  = CC_Greater,
+    
+    CC_Invalid    = 0xFF,
 };
 typedef u8 ConditionCode;
 

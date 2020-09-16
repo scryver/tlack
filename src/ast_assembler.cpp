@@ -830,9 +830,100 @@ emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
 }
 
-internal void
-emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destination)
+internal ConditionCode
+emit_cmp(Assembler *assembler, BinaryOpType op, AsmOperand *dst, AsmOperand *src)
 {
+    // NOTE(michiel): Only updates the flag register, doesn't move out the value
+    ConditionCode result = CC_Invalid;
+    if ((dst->kind == AsmOperand_Immediate) && (src->kind == AsmOperand_Immediate))
+    {
+        switch (op)
+        {
+            case Binary_Eq: { dst->oImmediate = dst->oImmediate == src->oImmediate; } break;
+            case Binary_Ne: { dst->oImmediate = dst->oImmediate != src->oImmediate; } break;
+            case Binary_Lt: { dst->oImmediate = dst->oImmediate <  src->oImmediate; } break;
+            case Binary_Gt: { dst->oImmediate = dst->oImmediate >  src->oImmediate; } break;
+            case Binary_LE: { dst->oImmediate = dst->oImmediate <= src->oImmediate; } break;
+            case Binary_GE: { dst->oImmediate = dst->oImmediate >= src->oImmediate; } break;
+            INVALID_DEFAULT_CASE;
+        }
+    }
+    else if ((dst->kind == AsmOperand_Immediate) && is_32bit(dst->oImmediate))
+    {
+        // TODO(michiel): Could use a 'test reg, reg' for the eq 0 case
+        ensure_operand_has_register_for_dst(assembler, src);
+        emit_r_i(assembler, cmp, src->oRegister, dst->oImmediate);
+        steal_operand_register(assembler, src, dst);
+        
+        switch (op)
+        {
+            case Binary_Eq: { result = CC_Equal; } break;
+            case Binary_Ne: { result = CC_NotEqual; } break;
+            case Binary_Lt: { result = CC_GreaterOrEqual; } break;
+            case Binary_Gt: { result = CC_LessOrEqual; } break;
+            case Binary_LE: { result = CC_Greater; } break;
+            case Binary_GE: { result = CC_Less; } break;
+            INVALID_DEFAULT_CASE;
+        }
+    }
+    else
+    {
+        ensure_operand_has_register_for_dst(assembler, dst);
+        
+        switch (src->kind)
+        {
+            case AsmOperand_Immediate: {
+                if (is_8bit(src->oImmediate))
+                {
+                    emit_r_ib(assembler, cmp, dst->oRegister, src->oImmediate);
+                }
+                else if (is_32bit(src->oImmediate))
+                {
+                    emit_r_i(assembler, cmp, dst->oRegister, src->oImmediate);
+                }
+                else
+                {
+                    ensure_operand_has_register_for_src(assembler, src);
+                    emit_r_r(assembler, cmp, dst->oRegister, src->oRegister);
+                }
+            } break;
+            
+            case AsmOperand_FrameOffset: {
+                emit_r_frame_offset(cmp, src->oFrameOffset, dst->oRegister);
+            } break;
+            
+            case AsmOperand_Address: {
+                emit_r_ripd(assembler, cmp, dst->oRegister, 0);
+                patch_with_operand_address(assembler, 1, src);
+            } break;
+            
+            case AsmOperand_LockedRegister:
+            case AsmOperand_Register: {
+                emit_r_r(assembler, cmp, dst->oRegister, src->oRegister);
+            } break;
+            
+            INVALID_DEFAULT_CASE;
+        }
+        
+        switch (op)
+        {
+            case Binary_Eq: { result = CC_Equal; } break;
+            case Binary_Ne: { result = CC_NotEqual; } break;
+            case Binary_Lt: { result = CC_Less; } break;
+            case Binary_Gt: { result = CC_Greater; } break;
+            case Binary_LE: { result = CC_LessOrEqual; } break;
+            case Binary_GE: { result = CC_GreaterOrEqual; } break;
+            INVALID_DEFAULT_CASE;
+        }
+    }
+    return result;
+}
+
+internal ConditionCode
+emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destination, AsmExprContext context)
+{
+    ConditionCode result = CC_Invalid;
+    // NOTE(michiel): context is only used for binary compare expressions
     i_expect(destination->kind == AsmOperand_None);
     switch (expression->kind)
     {
@@ -867,7 +958,7 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         } break;
         
         case Expr_Unary: {
-            emit_expression(assembler, expression->unary.operand, destination);
+            emit_expression(assembler, expression->unary.operand, destination, context);
             switch (expression->unary.op)
             {
                 case Unary_Minus: {
@@ -887,9 +978,9 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         } break;
         
         case Expr_Binary: {
-            emit_expression(assembler, expression->binary.left, destination);
+            emit_expression(assembler, expression->binary.left, destination, context);
             AsmOperand rightOp = {};
-            emit_expression(assembler, expression->binary.right, &rightOp);
+            emit_expression(assembler, expression->binary.right, &rightOp, context);
             switch (expression->binary.op)
             {
                 case Binary_Add: {
@@ -912,6 +1003,30 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
                     emit_mod(assembler, destination, &rightOp);
                 } break;
                 
+                case Binary_Eq:
+                case Binary_Ne:
+                case Binary_Lt:
+                case Binary_Gt:
+                case Binary_LE:
+                case Binary_GE: {
+                    BinaryOpType op = expression->binary.op;
+                    if (context == AsmExpr_ToValue)
+                    {
+                        Register destReg = allocate_register(assembler);
+                        emit_r_r(assembler, xor, destReg, destReg);
+                        result = emit_cmp(assembler, op, destination, &rightOp);
+                        emit_c_r(assembler, set, result, (Register)((destReg & 0xF) | Reg_AL));
+                        deallocate_operand(assembler, destination);
+                        destination->kind = AsmOperand_Register;
+                        destination->oRegister = destReg;
+                    }
+                    else
+                    {
+                        i_expect(context == AsmExpr_ToCompare);
+                        result = emit_cmp(assembler, op, destination, &rightOp);
+                    }
+                } break;
+                
                 INVALID_DEFAULT_CASE;
             }
             deallocate_operand(assembler, &rightOp);
@@ -919,6 +1034,8 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         
         INVALID_DEFAULT_CASE;
     }
+    
+    return result;
 }
 
 internal AsmStatementResult
@@ -961,8 +1078,8 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                     destination = leftSym->operand;
                 }
                 
-                //emit_expression(assembler, statement->assign.left, &destination);
-                emit_expression(assembler, statement->assign.right, &source);
+                //emit_expression(assembler, statement->assign.left, &destination, AsmExpr_ToValue);
+                emit_expression(assembler, statement->assign.right, &source, AsmExpr_ToValue);
                 switch (statement->assign.op)
                 {
                     //case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
@@ -1026,12 +1143,12 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
             Expression *expr = statement->expression;
             if (expr)
             {
-                emit_expression(assembler, expr, &destination);
+                emit_expression(assembler, expr, &destination, AsmExpr_ToValue);
                 emit_operand_to_register(assembler, &destination, Reg_RAX);
             }
             
             // NOTE(michiel): Most of the time we return something that has been calculated just before, so
-            // this mov after the return expression will make sure the return expression can used the cached
+            // this mov after the return expression will make sure the return expression can use the cached
             // register value of the previous line.
             if (prevResult.symbol)
             {
@@ -1040,7 +1157,7 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                 prevResult.symbol->loadedRegister = Reg_None;
             }
             
-            emit_pop(assembler, Reg_EBP);
+            //emit_pop(assembler, Reg_EBP);
             emit_ret(assembler);
             deallocate_operand(assembler, &destination);
         } break;
@@ -1079,7 +1196,7 @@ emit_function(Assembler *assembler, Function *function)
     
     // TODO(michiel): This preamble should be applied for bigger functions only, when Reg_RSP will be used...,
     // so to properly deal with this, this should be known by the AST itself.
-    emit_push(assembler, Reg_EBP);
+    //emit_push(assembler, Reg_EBP);
     emit_stmt_block(assembler, function->body);
     
     return result;

@@ -95,7 +95,7 @@ parse_mul_expr(Tokenizer *tokenizer, Ast *ast)
 }
 
 internal Expression *
-parse_expression(Tokenizer *tokenizer, Ast *ast)
+parse_add_expr(Tokenizer *tokenizer, Ast *ast)
 {
     SourcePos origin = tokenizer->origin;
     Expression *left = parse_mul_expr(tokenizer, ast);
@@ -123,6 +123,39 @@ parse_expression(Tokenizer *tokenizer, Ast *ast)
     return left;
 }
 
+internal Expression *
+parse_expression(Tokenizer *tokenizer, Ast *ast)
+{
+    SourcePos origin = tokenizer->origin;
+    Expression *left = parse_add_expr(tokenizer, ast);
+    Token token = peek_token(tokenizer);
+    if ((token.kind >= Token_Eq) && (token.kind <= Token_GtEq))
+    {
+        expect_token(tokenizer, token.kind);
+        
+        Expression *right = parse_add_expr(tokenizer, ast);
+        
+        BinaryOpType binOp = Binary_None;
+        switch (token.kind)
+        {
+            case Token_Eq:   { binOp = Binary_Eq; } break;
+            case Token_Neq:  { binOp = Binary_Ne; } break;
+            case Token_Lt:   { binOp = Binary_Lt; } break;
+            case Token_Gt:   { binOp = Binary_Gt; } break;
+            case Token_LtEq: { binOp = Binary_LE; } break;
+            case Token_GtEq: { binOp = Binary_GE; } break;
+            INVALID_DEFAULT_CASE;
+        }
+        left = create_binary_expr(ast, binOp, left, right);
+        left->origin = origin;
+        
+        token = peek_token(tokenizer);
+    }
+    return left;
+}
+
+internal StmtBlock *parse_statement_block(Tokenizer *tokenizer, Ast *ast);
+
 internal Statement *
 parse_statement(Tokenizer *tokenizer, Ast *ast)
 {
@@ -133,6 +166,33 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
         Expression *returnExpr = parse_expression(tokenizer, ast);
         expect_token(tokenizer, Token_SemiColon);
         result = create_return_stmt(ast, returnExpr);
+    }
+    else if (base.value == string("if"))
+    {
+        Expression *ifCondition = parse_expression(tokenizer, ast);
+        strip_newlines(tokenizer);
+        StmtBlock *ifBlock = parse_statement_block(tokenizer, ast);
+        strip_newlines(tokenizer);
+        ElIfBlock *elifBlocks = 0;
+        //MBUF(ElIfBlock, elifBlocks);
+        //elifBlocks = 0;
+        StmtBlock *elseBlock = 0;
+        while (match_token_name(tokenizer, string("elif")))
+        {
+            Expression *elifCondition = parse_expression(tokenizer, ast);
+            strip_newlines(tokenizer);
+            StmtBlock *elifBlock = parse_statement_block(tokenizer, ast);
+            strip_newlines(tokenizer);
+            mbuf_push(elifBlocks, ((ElIfBlock){elifCondition, elifBlock}));
+        }
+        if (match_token_name(tokenizer, string("else")))
+        {
+            strip_newlines(tokenizer);
+            elseBlock = parse_statement_block(tokenizer, ast);
+            strip_newlines(tokenizer);
+        }
+        result = create_if_stmt(ast, ifCondition, ifBlock, mbuf_count(elifBlocks), elifBlocks, elseBlock);
+        mbuf_deallocate(elifBlocks);
     }
     else
     {

@@ -1,5 +1,12 @@
 struct AsmSymbol;
 
+enum AsmExprContext
+{
+    AsmExpr_None,
+    AsmExpr_ToValue,   // NOTE(michiel): Like assign statements, we need a value in the end
+    AsmExpr_ToCompare, // NOTE(michiel): For if/while/for, we need the flags to be set, that's it
+};
+
 enum AsmOperandKind
 {
     AsmOperand_None,

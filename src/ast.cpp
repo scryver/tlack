@@ -78,6 +78,21 @@ create_return_stmt(Ast *ast, Expression *returned)
     return result;
 }
 
+internal Statement *
+create_if_stmt(Ast *ast, Expression *ifCond, StmtBlock *ifBlock, u32 elifCount, ElIfBlock *elifBlocks, StmtBlock *elseBlock)
+{
+    Statement *result = allocate_statement(ast, Stmt_IfElse);
+    result->ifElse.ifCondition = ifCond;
+    result->ifElse.ifBlock = ifBlock;
+    result->ifElse.elIfCount = elifCount;
+    if (elifCount) {
+        result->ifElse.elIfBlocks = (ElIfBlock *)ast_allocate(ast, sizeof(ElIfBlock)*elifCount);
+        copy(sizeof(ElIfBlock)*elifCount, elifBlocks, result->ifElse.elIfBlocks);
+    }
+    result->ifElse.elseBlock = elseBlock;
+    return result;
+}
+
 internal StmtBlock *
 create_statement_block(Ast *ast, u32 statementCount, Statement **statements)
 {
@@ -133,6 +148,12 @@ print_expression(FileStream *output, Expression *expression)
                 case Binary_Mul : binaryName = "*"; break;
                 case Binary_Div : binaryName = "/"; break;
                 case Binary_Mod : binaryName = "%"; break;
+                case Binary_Eq  : binaryName = "=="; break;
+                case Binary_Ne  : binaryName = "!="; break;
+                case Binary_Lt  : binaryName = "<"; break;
+                case Binary_Gt  : binaryName = ">"; break;
+                case Binary_LE  : binaryName = "<="; break;
+                case Binary_GE  : binaryName = ">="; break;
                 INVALID_DEFAULT_CASE;
             }
             print(output, "(%s ", binaryName);
@@ -145,6 +166,8 @@ print_expression(FileStream *output, Expression *expression)
         INVALID_DEFAULT_CASE;
     }
 }
+
+internal void print_stmt_block(FileStream *output, StmtBlock *block, b32 startNewline = true);
 
 internal void
 print_statement(FileStream *output, Statement *statement)
@@ -182,21 +205,57 @@ print_statement(FileStream *output, Statement *statement)
             }
         } break;
         
+        case Stmt_IfElse: {
+            println_begin(output, "(if ");
+            print_expression(output, statement->ifElse.ifCondition);
+            println_end(output, " then");
+            ++output->indent;
+            print_stmt_block(output, statement->ifElse.ifBlock, false);
+            for (u32 elifIdx = 0; elifIdx < statement->ifElse.elIfCount; ++elifIdx)
+            {
+                ElIfBlock *elif = statement->ifElse.elIfBlocks + elifIdx;
+                --output->indent;
+                println_begin(output, " elif ");
+                print_expression(output, elif->condition);
+                println_end(output, " then");
+                ++output->indent;
+                print_stmt_block(output, elif->block, false);
+            }
+            if (statement->ifElse.elseBlock)
+            {
+                --output->indent;
+                println(output, " else");
+                ++output->indent;
+                print_stmt_block(output, statement->ifElse.elseBlock, false);
+            }
+            --output->indent;
+            println(output, ")");
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
 }
 
 internal void
-print_stmt_block(FileStream *output, StmtBlock *block)
+print_stmt_block(FileStream *output, StmtBlock *block, b32 startNewline)
 {
-    println(output, "(");
+    startNewline = true;
+    if (startNewline) {
+        println(output, "(");
+    } else {
+        println_end(output, "(");
+    }
     ++output->indent;
     for (u32 stmtIdx = 0; stmtIdx < block->stmtCount; ++stmtIdx)
     {
         print_statement(output, block->statements[stmtIdx]);
     }
     --output->indent;
-    println(output, ")");
+    if (startNewline) {
+        println(output, ")");
+    } else {
+        println_begin(output, ")");
+    }
 }
 
 internal void

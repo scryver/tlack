@@ -41,7 +41,13 @@ graph_ast_expression(Ast *ast, FileStream *output, Expression *expression, Strin
                 case Binary_Sub: { graph_label(output, opStr, "-"); } break;
                 case Binary_Mul: { graph_label(output, opStr, "*"); } break;
                 case Binary_Div: { graph_label(output, opStr, "/"); } break;
-                case Binary_Mod: { graph_label(output, opStr, "%"); } break;
+                case Binary_Mod: { graph_label(output, opStr, "%%"); } break;
+                case Binary_Eq : { graph_label(output, opStr, "=="); } break;
+                case Binary_Ne : { graph_label(output, opStr, "!="); } break;
+                case Binary_Lt : { graph_label(output, opStr, "<"); } break;
+                case Binary_Gt : { graph_label(output, opStr, ">"); } break;
+                case Binary_LE : { graph_label(output, opStr, "<="); } break;
+                case Binary_GE : { graph_label(output, opStr, ">="); } break;
                 INVALID_DEFAULT_CASE;
             }
             graph_connect(output, connection, opStr);

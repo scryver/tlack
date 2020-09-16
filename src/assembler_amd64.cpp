@@ -416,6 +416,7 @@ OPERATION_1_M(mov, OC_MovRtoRM)
 OPERATION_1_I(movsx, OC_MovItoRM, 0x00)   // NOTE(michiel): Only sign extended from 32b imm -> 64b reg
 OPERATION_1_IB(mov, OC_MovI8toRM8, 0x00)
 OPERATION_2_R(movsxb, 0xBE)
+OPERATION_2_R(movzxb, 0xB6)
 
 // NOTE(michiel): Variable shifts only with CL
 OPERATION_1_IB(shl, OC_RotShftRMbyI, 0x04)

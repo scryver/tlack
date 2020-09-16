@@ -1,4 +1,5 @@
 struct Expression;
+struct Statement;
 
 enum DeclKind
 {
@@ -37,6 +38,12 @@ enum BinaryOpType
     Binary_Mul,
     Binary_Div,
     Binary_Mod,
+    Binary_Eq,
+    Binary_Ne,
+    Binary_Lt,
+    Binary_Gt,
+    Binary_LE,
+    Binary_GE,
 };
 struct BinaryOp
 {
@@ -52,6 +59,7 @@ enum ExprKind
     Expr_Identifier,
     Expr_Unary,
     Expr_Binary,
+    //Expr_Condition,??
 };
 struct Expression
 {
@@ -64,6 +72,12 @@ struct Expression
         UnaryOp unary;
         BinaryOp binary;
     };
+};
+
+struct StmtBlock
+{
+    u32 stmtCount;
+    Statement **statements;
 };
 
 enum AssignOpType
@@ -83,11 +97,27 @@ struct Assignment
     Expression *right;
 };
 
+struct ElIfBlock
+{
+    Expression *condition;
+    StmtBlock  *block;
+};
+
+struct IfElse
+{
+    Expression *ifCondition;
+    StmtBlock  *ifBlock;
+    u32         elIfCount;
+    ElIfBlock  *elIfBlocks;
+    StmtBlock  *elseBlock;
+};
+
 enum StmtKind
 {
     Stmt_None,
     Stmt_Assign,
     Stmt_Return,
+    Stmt_IfElse,
 };
 struct Statement
 {
@@ -97,13 +127,8 @@ struct Statement
     union {
         Expression *expression;
         Assignment assign;
+        IfElse     ifElse;
     };
-};
-
-struct StmtBlock
-{
-    u32 stmtCount;
-    Statement **statements;
 };
 
 struct Function
