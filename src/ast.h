@@ -67,10 +67,10 @@ struct Expression
     ExprKind kind;
     
     union {
-        s64 intConst;
-        String name;
-        UnaryOp unary;
-        BinaryOp binary;
+        s64      eIntConst;
+        String   eName;
+        UnaryOp  eUnary;
+        BinaryOp eBinary;
     };
 };
 
@@ -93,11 +93,11 @@ enum AssignOpType
 struct Assignment
 {
     AssignOpType op;
-    Expression *left; // TODO(michiel): Maybe make a variable?
-    Expression *right;
+    Expression  *left; // TODO(michiel): Maybe make a variable?
+    Expression  *right;
 };
 
-struct ElIfBlock
+struct ConditionBlock
 {
     Expression *condition;
     StmtBlock  *block;
@@ -105,11 +105,10 @@ struct ElIfBlock
 
 struct IfElse
 {
-    Expression *ifCondition;
-    StmtBlock  *ifBlock;
-    u32         elIfCount;
-    ElIfBlock  *elIfBlocks;
-    StmtBlock  *elseBlock;
+    ConditionBlock  ifBlock;
+    u32             elIfCount;
+    ConditionBlock *elIfBlocks;
+    StmtBlock      *elseBlock;
 };
 
 enum StmtKind
@@ -118,6 +117,8 @@ enum StmtKind
     Stmt_Assign,
     Stmt_Return,
     Stmt_IfElse,
+    Stmt_DoWhile,
+    Stmt_While,
 };
 struct Statement
 {
@@ -125,16 +126,18 @@ struct Statement
     StmtKind kind;
     
     union {
-        Expression *expression;
-        Assignment assign;
-        IfElse     ifElse;
+        Expression    *sExpression;
+        Assignment     sAssign;
+        IfElse         sIf;
+        ConditionBlock sDo;
+        ConditionBlock sWhile;
     };
 };
 
 struct Function
 {
-    SourcePos origin;
-    String name;
+    SourcePos  origin;
+    String     name;
     StmtBlock *body;
 };
 

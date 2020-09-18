@@ -5,6 +5,12 @@ graph_connect(FileStream *output, String from, String to)
 }
 
 internal void
+graph_dash_connect(FileStream *output, String from, String to)
+{
+    println(output, "%.*s -> %.*s [style=dashed];", STR_FMT(from), STR_FMT(to));
+}
+
+internal void
 graph_label(FileStream *output, String name, String label)
 {
     println(output, "%.*s [label=\"%.*s\"];", STR_FMT(name), STR_FMT(label));

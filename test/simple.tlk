@@ -27,8 +27,21 @@ func main()
     {
         test = 0x40;
     }
-    test = b + c + d + e + f + g;
-    return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
+
+    do
+    {
+        test += 0x07;
+    }
+    while (test < 0x80);
+
+    while (test < 0x300)
+    {
+        test += 0x100;
+    }
+
+    //test = b + c + d + e + f + g;
+    //return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
+    return test;
 }
 
 

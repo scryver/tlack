@@ -130,6 +130,12 @@ enum ConditionCodesEnum
 };
 typedef u8 ConditionCode;
 
+internal ConditionCode
+invert_condition(ConditionCode cc)
+{
+    return cc ^ 0x1;
+}
+
 // NOTE(michiel): Immediates are 32b max
 enum OpCodes
 {

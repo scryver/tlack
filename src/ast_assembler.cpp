@@ -66,14 +66,14 @@ allocate_register(Assembler *assembler)
     i_expect(firstFree.found);
     assembler->freeRegisterMask &= ~(1 << firstFree.index);
     Register result = (Register)(Reg_RAX | firstFree.index);
-    fprintf(stderr, "Alloc 0x%02X\n", result & 0xF);
+    //fprintf(stderr, "Alloc 0x%02X\n", result & 0xF);
     return result;
 }
 
 internal Register
 allocate_register(Assembler *assembler, Register reg)
 {
-    fprintf(stderr, "Alloc R 0x%02X\n", reg & 0xF);
+    //fprintf(stderr, "Alloc R 0x%02X\n", reg & 0xF);
     i_expect(!is_register_used(assembler, reg));
     assembler->freeRegisterMask &= ~(1 << (reg & 0xF));
     Register result = reg;
@@ -83,7 +83,7 @@ allocate_register(Assembler *assembler, Register reg)
 internal void
 deallocate_register(Assembler *assembler, Register oldReg)
 {
-    fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
+    //fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
     i_expect((assembler->freeRegisterMask & (1 << (oldReg & 0xF))) == 0);
     assembler->freeRegisterMask |= (1 << (oldReg & 0xF));
     assembler->registerUsage[oldReg & 0xF] = 0;
@@ -929,11 +929,11 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
     {
         case Expr_Int: {
             destination->kind = AsmOperand_Immediate;
-            destination->oImmediate = expression->intConst;
+            destination->oImmediate = expression->eIntConst;
         } break;
         
         case Expr_Identifier: {
-            AsmSymbol *symbol = find_symbol(assembler, expression->name);
+            AsmSymbol *symbol = find_symbol(assembler, expression->eName);
             if (symbol)
             {
                 *destination = symbol->operand;
@@ -949,7 +949,7 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
             }
             else
             {
-                ast_assemble_error(expression->origin, "Identifier '%.*s' was not declared.\n", STR_FMT(expression->name));
+                ast_assemble_error(expression->origin, "Identifier '%.*s' was not declared.\n", STR_FMT(expression->eName));
                 //FileStream errors = {};
                 //errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
                 //print_expression(&errors, expression);
@@ -958,8 +958,8 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         } break;
         
         case Expr_Unary: {
-            emit_expression(assembler, expression->unary.operand, destination, context);
-            switch (expression->unary.op)
+            emit_expression(assembler, expression->eUnary.operand, destination, context);
+            switch (expression->eUnary.op)
             {
                 case Unary_Minus: {
                     emit_neg(assembler, destination);
@@ -978,10 +978,10 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
         } break;
         
         case Expr_Binary: {
-            emit_expression(assembler, expression->binary.left, destination, context);
+            emit_expression(assembler, expression->eBinary.left, destination, context);
             AsmOperand rightOp = {};
-            emit_expression(assembler, expression->binary.right, &rightOp, context);
-            switch (expression->binary.op)
+            emit_expression(assembler, expression->eBinary.right, &rightOp, context);
+            switch (expression->eBinary.op)
             {
                 case Binary_Add: {
                     emit_add(assembler, destination, &rightOp);
@@ -1009,7 +1009,7 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
                 case Binary_Gt:
                 case Binary_LE:
                 case Binary_GE: {
-                    BinaryOpType op = expression->binary.op;
+                    BinaryOpType op = expression->eBinary.op;
                     if (context == AsmExpr_ToValue)
                     {
                         Register destReg = allocate_register(assembler);
@@ -1038,6 +1038,8 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
     return result;
 }
 
+internal void emit_stmt_block(Assembler *assembler, StmtBlock *block);
+
 internal AsmStatementResult
 emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult prevResult)
 {
@@ -1045,14 +1047,14 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
     switch (statement->kind)
     {
         case Stmt_Assign: {
-            if (statement->assign.left->kind == Expr_Identifier)
+            if (statement->sAssign.left->kind == Expr_Identifier)
             {
                 AsmOperand destination = {};
                 AsmOperand source = {};
-                AsmSymbol *leftSym = find_symbol(assembler, statement->assign.left->name);
+                AsmSymbol *leftSym = find_symbol(assembler, statement->sAssign.left->eName);
                 if (!leftSym)
                 {
-                    leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->assign.left->name);
+                    leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->sAssign.left->eName);
                 }
                 i_expect(leftSym);
                 
@@ -1079,8 +1081,8 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                 }
                 
                 //emit_expression(assembler, statement->assign.left, &destination, AsmExpr_ToValue);
-                emit_expression(assembler, statement->assign.right, &source, AsmExpr_ToValue);
-                switch (statement->assign.op)
+                emit_expression(assembler, statement->sAssign.right, &source, AsmExpr_ToValue);
+                switch (statement->sAssign.op)
                 {
                     //case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
                     case Assign_Set: {
@@ -1140,7 +1142,7 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
         case Stmt_Return: {
             AsmOperand destination = {};
             
-            Expression *expr = statement->expression;
+            Expression *expr = statement->sExpression;
             if (expr)
             {
                 emit_expression(assembler, expr, &destination, AsmExpr_ToValue);
@@ -1160,6 +1162,105 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
             //emit_pop(assembler, Reg_EBP);
             emit_ret(assembler);
             deallocate_operand(assembler, &destination);
+        } break;
+        
+        case Stmt_IfElse: {
+            // TODO(michiel): Cache last compare
+            AsmOperand destination = {};
+            
+#if 1
+            // TODO(michiel): Skip this maybe?
+            if (prevResult.symbol)
+            {
+                emit_mov(assembler, &prevResult.original, &prevResult.result);
+                deallocate_operand(assembler, &prevResult.result);
+                prevResult.symbol->loadedRegister = Reg_None;
+            }
+#endif
+            
+            ConditionCode cc = emit_expression(assembler, statement->sIf.ifBlock.condition, &destination, AsmExpr_ToCompare);
+            deallocate_operand(assembler, &destination);
+            i_expect(cc != CC_Invalid);
+            emit_c_i(assembler, j, invert_condition(cc), 0);
+            u32 ifStart = assembler->codeAt;
+            emit_stmt_block(assembler, statement->sIf.ifBlock.block);
+            
+            u32 *endJumps = 0;
+            u32 ifEnd = assembler->codeAt;
+            if (statement->sIf.elseBlock || statement->sIf.elIfCount)
+            {
+                emit_i(assembler, jmp, 0);
+                ifEnd = assembler->codeAt;
+                mbuf_push(endJumps, ifEnd);
+            }
+            s32 diff = ifEnd - ifStart;
+            *(s32 *)(assembler->codeData.data + ifStart - 4) = diff;
+            
+            for (u32 elifIdx = 0; elifIdx < statement->sIf.elIfCount; ++elifIdx)
+            {
+                AsmOperand ccResult = {};
+                ConditionBlock *elif = statement->sIf.elIfBlocks + elifIdx;
+                cc = emit_expression(assembler, elif->condition, &ccResult, AsmExpr_ToCompare);
+                deallocate_operand(assembler, &ccResult);
+                i_expect(cc != CC_Invalid);
+                emit_c_i(assembler, j, invert_condition(cc), 0);
+                u32 elifStart = assembler->codeAt;
+                emit_stmt_block(assembler, elif->block);
+                
+                u32 elifEnd = assembler->codeAt;
+                if (statement->sIf.elseBlock || (elifIdx < (statement->sIf.elIfCount - 1)))
+                {
+                    emit_i(assembler, jmp, 0);
+                    elifEnd = assembler->codeAt;
+                    mbuf_push(endJumps, elifEnd);
+                }
+                s32 elifDiff = elifEnd - elifStart;
+                *(s32 *)(assembler->codeData.data + elifStart - 4) = elifDiff;
+            }
+            
+            if (statement->sIf.elseBlock)
+            {
+                emit_stmt_block(assembler, statement->sIf.elseBlock);
+            }
+            
+            u32 codeAt = assembler->codeAt;
+            for (u32 backpatchIdx = 0; backpatchIdx < mbuf_count(endJumps); ++backpatchIdx)
+            {
+                u32 address = endJumps[backpatchIdx];
+                s32 diff = codeAt - address;
+                *(s32 *)(assembler->codeData.data + address - 4) = diff;
+            }
+            
+            mbuf_deallocate(endJumps);
+        } break;
+        
+        case Stmt_DoWhile: {
+            AsmOperand doResult = {};
+            u32 doStart = assembler->codeAt;
+            emit_stmt_block(assembler, statement->sDo.block);
+            ConditionCode cc = emit_expression(assembler, statement->sDo.condition, &doResult, AsmExpr_ToCompare);
+            deallocate_operand(assembler, &doResult);
+            i_expect(cc != CC_Invalid);
+            emit_c_i(assembler, j, cc, 0);
+            s32 diff = doStart - assembler->codeAt;
+            *(s32 *)(assembler->codeData.data + assembler->codeAt - 4) = diff;
+        } break;
+        
+        case Stmt_While: {
+            AsmOperand whileResult = {};
+            emit_i(assembler, jmp, 0);
+            u32 doStart = assembler->codeAt;
+            emit_stmt_block(assembler, statement->sWhile.block);
+            
+            s32 jmpTo = assembler->codeAt - doStart;
+            *(s32 *)(assembler->codeData.data + doStart - 4) = jmpTo;
+            
+            ConditionCode cc = emit_expression(assembler, statement->sWhile.condition, &whileResult, AsmExpr_ToCompare);
+            deallocate_operand(assembler, &whileResult);
+            i_expect(cc != CC_Invalid);
+            emit_c_i(assembler, j, cc, 0);
+            s32 diff = doStart - assembler->codeAt;
+            *(s32 *)(assembler->codeData.data + assembler->codeAt - 4) = diff;
         } break;
         
         INVALID_DEFAULT_CASE;

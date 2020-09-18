@@ -4,10 +4,13 @@ program    := function 'main'
 
 function   := stmt_block
 
-stmt_block := statement*
+stmt_block := statement+
 
 statement  := assignment
             | return
+            | ifelse
+            | dowhile
+            | while
 
 assignment := assign_op NAME expr
 assign_op  := Assign_Set
@@ -17,6 +20,12 @@ assign_op  := Assign_Set
             | Assign_Div
 
 return     := expr?
+
+ifelse     := expr stmt_block (expr stmt_block)* (stmt_block?)
+
+dowhile    := stmt_block expr
+
+while      := expr stmt_block
 
 expr       := INT64
             | NAME

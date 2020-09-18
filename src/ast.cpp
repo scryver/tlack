@@ -29,7 +29,7 @@ internal Expression *
 create_signed_int(Ast *ast, s64 intConst)
 {
     Expression *result = allocate_expression(ast, Expr_Int);
-    result->intConst = intConst;
+    result->eIntConst = intConst;
     return result;
 }
 
@@ -37,7 +37,7 @@ internal Expression *
 create_identifier(Ast *ast, String name)
 {
     Expression *result = allocate_expression(ast, Expr_Identifier);
-    result->name = minterned_string(&ast->interns, name);
+    result->eName = minterned_string(&ast->interns, name);
     return result;
 }
 
@@ -45,8 +45,8 @@ internal Expression *
 create_unary_expr(Ast *ast, UnaryOpType op, Expression *operand)
 {
     Expression *result = allocate_expression(ast, Expr_Unary);
-    result->unary.op = op;
-    result->unary.operand = operand;
+    result->eUnary.op = op;
+    result->eUnary.operand = operand;
     return result;
 }
 
@@ -54,9 +54,9 @@ internal Expression *
 create_binary_expr(Ast *ast, BinaryOpType op, Expression *left, Expression *right)
 {
     Expression *result = allocate_expression(ast, Expr_Binary);
-    result->binary.op = op;
-    result->binary.left = left;
-    result->binary.right = right;
+    result->eBinary.op = op;
+    result->eBinary.left = left;
+    result->eBinary.right = right;
     return result;
 }
 
@@ -64,9 +64,9 @@ internal Statement *
 create_assign_stmt(Ast *ast, AssignOpType op, Expression *left, Expression *right)
 {
     Statement *result = allocate_statement(ast, Stmt_Assign);
-    result->assign.op = op;
-    result->assign.left = left;
-    result->assign.right = right;
+    result->sAssign.op = op;
+    result->sAssign.left = left;
+    result->sAssign.right = right;
     return result;
 }
 
@@ -74,22 +74,40 @@ internal Statement *
 create_return_stmt(Ast *ast, Expression *returned)
 {
     Statement *result = allocate_statement(ast, Stmt_Return);
-    result->expression = returned;
+    result->sExpression = returned;
     return result;
 }
 
 internal Statement *
-create_if_stmt(Ast *ast, Expression *ifCond, StmtBlock *ifBlock, u32 elifCount, ElIfBlock *elifBlocks, StmtBlock *elseBlock)
+create_if_stmt(Ast *ast, Expression *ifCond, StmtBlock *ifBlock, u32 elifCount, ConditionBlock *elifBlocks, StmtBlock *elseBlock)
 {
     Statement *result = allocate_statement(ast, Stmt_IfElse);
-    result->ifElse.ifCondition = ifCond;
-    result->ifElse.ifBlock = ifBlock;
-    result->ifElse.elIfCount = elifCount;
+    result->sIf.ifBlock.condition = ifCond;
+    result->sIf.ifBlock.block = ifBlock;
+    result->sIf.elIfCount = elifCount;
     if (elifCount) {
-        result->ifElse.elIfBlocks = (ElIfBlock *)ast_allocate(ast, sizeof(ElIfBlock)*elifCount);
-        copy(sizeof(ElIfBlock)*elifCount, elifBlocks, result->ifElse.elIfBlocks);
+        result->sIf.elIfBlocks = (ConditionBlock *)ast_allocate(ast, sizeof(ConditionBlock)*elifCount);
+        copy(sizeof(ConditionBlock)*elifCount, elifBlocks, result->sIf.elIfBlocks);
     }
-    result->ifElse.elseBlock = elseBlock;
+    result->sIf.elseBlock = elseBlock;
+    return result;
+}
+
+internal Statement *
+create_do_stmt(Ast *ast, Expression *cond, StmtBlock *block)
+{
+    Statement *result = allocate_statement(ast, Stmt_DoWhile);
+    result->sDo.condition = cond;
+    result->sDo.block = block;
+    return result;
+}
+
+internal Statement *
+create_while_stmt(Ast *ast, Expression *cond, StmtBlock *block)
+{
+    Statement *result = allocate_statement(ast, Stmt_While);
+    result->sDo.condition = cond;
+    result->sDo.block = block;
     return result;
 }
 
@@ -118,16 +136,16 @@ print_expression(FileStream *output, Expression *expression)
     switch (expression->kind)
     {
         case Expr_Int: {
-            print(output, "%ld", expression->intConst);
+            print(output, "%ld", expression->eIntConst);
         } break;
         
         case Expr_Identifier: {
-            print(output, "%.*s", STR_FMT(expression->name));
+            print(output, "%.*s", STR_FMT(expression->eName));
         } break;
         
         case Expr_Unary: {
             char *unaryName = "unknown";
-            switch (expression->unary.op)
+            switch (expression->eUnary.op)
             {
                 case Unary_Minus: unaryName = "-"; break;
                 case Unary_Flip : unaryName = "~"; break;
@@ -135,13 +153,13 @@ print_expression(FileStream *output, Expression *expression)
                 INVALID_DEFAULT_CASE;
             }
             print(output, "(%s ", unaryName);
-            print_expression(output, expression->unary.operand);
+            print_expression(output, expression->eUnary.operand);
             print(output, ")");
         } break;
         
         case Expr_Binary: {
             char *binaryName = "unknown";
-            switch (expression->binary.op)
+            switch (expression->eBinary.op)
             {
                 case Binary_Add : binaryName = "+"; break;
                 case Binary_Sub : binaryName = "-"; break;
@@ -157,9 +175,9 @@ print_expression(FileStream *output, Expression *expression)
                 INVALID_DEFAULT_CASE;
             }
             print(output, "(%s ", binaryName);
-            print_expression(output, expression->binary.left);
+            print_expression(output, expression->eBinary.left);
             print(output, " ");
-            print_expression(output, expression->binary.right);
+            print_expression(output, expression->eBinary.right);
             print(output, ")");
         } break;
         
@@ -176,7 +194,7 @@ print_statement(FileStream *output, Statement *statement)
     {
         case Stmt_Assign: {
             char *assignName = "unknown";
-            switch (statement->assign.op)
+            switch (statement->sAssign.op)
             {
                 case Assign_Set : assignName = "="; break;
                 case Assign_Add : assignName = "+="; break;
@@ -187,16 +205,16 @@ print_statement(FileStream *output, Statement *statement)
                 INVALID_DEFAULT_CASE;
             }
             println_begin(output, "(%s ", assignName);
-            print_expression(output, statement->assign.left);
+            print_expression(output, statement->sAssign.left);
             print(output, " ");
-            print_expression(output, statement->assign.right);
+            print_expression(output, statement->sAssign.right);
             println_end(output, ")");
         } break;
         
         case Stmt_Return: {
-            if (statement->expression) {
+            if (statement->sExpression) {
                 println_begin(output, "(return ");
-                print_expression(output, statement->expression);
+                print_expression(output, statement->sExpression);
                 println_end(output, ")");
             }
             else
@@ -207,13 +225,13 @@ print_statement(FileStream *output, Statement *statement)
         
         case Stmt_IfElse: {
             println_begin(output, "(if ");
-            print_expression(output, statement->ifElse.ifCondition);
+            print_expression(output, statement->sIf.ifBlock.condition);
             println_end(output, " then");
             ++output->indent;
-            print_stmt_block(output, statement->ifElse.ifBlock, false);
-            for (u32 elifIdx = 0; elifIdx < statement->ifElse.elIfCount; ++elifIdx)
+            print_stmt_block(output, statement->sIf.ifBlock.block, false);
+            for (u32 elifIdx = 0; elifIdx < statement->sIf.elIfCount; ++elifIdx)
             {
-                ElIfBlock *elif = statement->ifElse.elIfBlocks + elifIdx;
+                ConditionBlock *elif = statement->sIf.elIfBlocks + elifIdx;
                 --output->indent;
                 println_begin(output, " elif ");
                 print_expression(output, elif->condition);
@@ -221,15 +239,34 @@ print_statement(FileStream *output, Statement *statement)
                 ++output->indent;
                 print_stmt_block(output, elif->block, false);
             }
-            if (statement->ifElse.elseBlock)
+            if (statement->sIf.elseBlock)
             {
                 --output->indent;
                 println(output, " else");
                 ++output->indent;
-                print_stmt_block(output, statement->ifElse.elseBlock, false);
+                print_stmt_block(output, statement->sIf.elseBlock, false);
             }
             --output->indent;
             println(output, ")");
+        } break;
+        
+        case Stmt_DoWhile: {
+            println(output, "(do");
+            ++output->indent;
+            print_stmt_block(output, statement->sDo.block);
+            --output->indent;
+            println_begin(output, " while ");
+            print_expression(output, statement->sDo.condition);
+            println_end(output, ")");
+        } break;
+        
+        case Stmt_While: {
+            println_begin(output, "(while ");
+            print_expression(output, statement->sWhile.condition);
+            println_end(output, "");
+            ++output->indent;
+            print_stmt_block(output, statement->sWhile.block);
+            --output->indent;
         } break;
         
         INVALID_DEFAULT_CASE;

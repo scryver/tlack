@@ -173,7 +173,7 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
         strip_newlines(tokenizer);
         StmtBlock *ifBlock = parse_statement_block(tokenizer, ast);
         strip_newlines(tokenizer);
-        ElIfBlock *elifBlocks = 0;
+        ConditionBlock *elifBlocks = 0;
         //MBUF(ElIfBlock, elifBlocks);
         //elifBlocks = 0;
         StmtBlock *elseBlock = 0;
@@ -183,7 +183,7 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
             strip_newlines(tokenizer);
             StmtBlock *elifBlock = parse_statement_block(tokenizer, ast);
             strip_newlines(tokenizer);
-            mbuf_push(elifBlocks, ((ElIfBlock){elifCondition, elifBlock}));
+            mbuf_push(elifBlocks, ((ConditionBlock){elifCondition, elifBlock}));
         }
         if (match_token_name(tokenizer, string("else")))
         {
@@ -193,6 +193,23 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
         }
         result = create_if_stmt(ast, ifCondition, ifBlock, mbuf_count(elifBlocks), elifBlocks, elseBlock);
         mbuf_deallocate(elifBlocks);
+    }
+    else if (base.value == string("do"))
+    {
+        strip_newlines(tokenizer);
+        StmtBlock *doBlock = parse_statement_block(tokenizer, ast);
+        strip_newlines(tokenizer);
+        expect_name(tokenizer, string("while"));
+        Expression *doCond = parse_expression(tokenizer, ast);
+        expect_token(tokenizer, Token_SemiColon);
+        result = create_do_stmt(ast, doCond, doBlock);
+    }
+    else if (base.value == string("while"))
+    {
+        Expression *whileCond = parse_expression(tokenizer, ast);
+        strip_newlines(tokenizer);
+        StmtBlock *whileBlock = parse_statement_block(tokenizer, ast);
+        result = create_while_stmt(ast, whileCond, whileBlock);
     }
     else
     {
