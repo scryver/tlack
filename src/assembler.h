@@ -55,16 +55,27 @@ enum AsmSymbolKind
 struct AsmSymbol
 {
     AsmSymbolKind kind;
+    b32 unsaved;               // NOTE(michiel): If set the loadedRegister contains a newer value
     Register loadedRegister;
     String name;
-    AsmOperand operand; // NOTE(michiel): FrameOffset or Address (maybe Immediate for const later on?)
+    AsmOperand operand;        // NOTE(michiel): FrameOffset or Address (maybe Immediate for const later on?)
 };
 
-struct AsmStatementResult
+enum AsmRegUseKind
 {
-    AsmSymbol *symbol;
-    AsmOperand original;
-    AsmOperand result;
+    AsmReg_None,
+    AsmReg_AllocatedReg,
+    AsmReg_TempOperand,
+    AsmReg_Symbol,
+};
+struct AsmRegUser
+{
+    AsmRegUseKind kind;
+    Register      reg;  // TODO(michiel): Maybe not needed??
+    union {
+        AsmSymbol  *symbol;
+        AsmOperand *operand;
+    };
 };
 
 #define MAX_GLOBAL_SYMBOLS  1024
@@ -84,8 +95,8 @@ struct Assembler
     Buffer codeData;
     umm codeAt;
     
-    AsmOperand *registerUsage[MAX_REGISTERS]; // NOTE(michiel): Only valid when bit in freeRegisterMask is not set
     u32 freeRegisterMask;
+    AsmRegUser registerUsers[MAX_REGISTERS]; // NOTE(michiel): Only valid when bit in freeRegisterMask is not set
 };
 
 internal b32

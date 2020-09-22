@@ -39,15 +39,18 @@ i_expect(is_32bit(offset)); \
 emit_x_md(assembler, op, Reg_RBP, (offset)); \
 }
 
+// TODO(michiel): Add RAX and RDX and check usage in div/mul, maybe use a OC_XchgRMtoR to swap them if needed
+// NOTE(michiel): RAX/RDX are very volatile
+//                RBX, R12-R15 are callee-saved, so try not to use them
+global Register gUsableRegisters[] = {Reg_RCX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10, Reg_R11, Reg_RAX, Reg_RDX};
+
+internal void emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src);
+
 internal void
 initialize_free_registers(Assembler *assembler)
 {
-    // TODO(michiel): Add RAX and RDX and check usage in div/mul, maybe use a OC_XchgRMtoR to swap them if needed
-    // NOTE(michiel): RAX/RDX are very volatile
-    //                RBX, R12-R15 are callee-saved, so try not to use them
-    Register available_registers[] = {Reg_RCX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10, Reg_R11, Reg_RAX, Reg_RDX};
-    for (size_t i = 0; i < sizeof(available_registers) / sizeof(*available_registers); i++) {
-        assembler->freeRegisterMask |= 1 << (available_registers[i] & 0xF);
+    for (size_t i = 0; i < array_count(gUsableRegisters); i++) {
+        assembler->freeRegisterMask |= 1 << (gUsableRegisters[i] & 0xF);
     }
 }
 
@@ -57,36 +60,117 @@ is_register_used(Assembler *assembler, Register reg)
     return !(assembler->freeRegisterMask & (1 << (reg & 0xF)));
 }
 
-internal Register
-allocate_register(Assembler *assembler)
-{
-    i_expect(assembler->freeRegisterMask);
-    //BitScanResult firstFree = find_least_significant_set_bit(assembler->freeRegisterMask);
-    BitScanResult firstFree = find_most_significant_set_bit(assembler->freeRegisterMask);
-    i_expect(firstFree.found);
-    assembler->freeRegisterMask &= ~(1 << firstFree.index);
-    Register result = (Register)(Reg_RAX | firstFree.index);
-    //fprintf(stderr, "Alloc 0x%02X\n", result & 0xF);
-    return result;
-}
-
-internal Register
-allocate_register(Assembler *assembler, Register reg)
-{
-    //fprintf(stderr, "Alloc R 0x%02X\n", reg & 0xF);
-    i_expect(!is_register_used(assembler, reg));
-    assembler->freeRegisterMask &= ~(1 << (reg & 0xF));
-    Register result = reg;
-    return result;
-}
-
 internal void
 deallocate_register(Assembler *assembler, Register oldReg)
 {
     //fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
     i_expect((assembler->freeRegisterMask & (1 << (oldReg & 0xF))) == 0);
     assembler->freeRegisterMask |= (1 << (oldReg & 0xF));
-    assembler->registerUsage[oldReg & 0xF] = 0;
+    assembler->registerUsers[oldReg & 0xF].kind = AsmReg_None;
+}
+
+internal void
+save_symbol(Assembler *assembler, AsmSymbol *symbol)
+{
+    i_expect(symbol->loadedRegister != Reg_None);
+    if (symbol->unsaved)
+    {
+        AsmRegUser *usage = assembler->registerUsers + (symbol->loadedRegister & 0xF);
+        i_expect(symbol->loadedRegister == usage->reg);
+        AsmOperand source = {};
+        source.kind = AsmOperand_Register;
+        source.oRegister = usage->reg;
+        emit_mov(assembler, &symbol->operand, &source);
+        symbol->unsaved = false;
+    }
+}
+
+internal void
+save_all_registers(Assembler *assembler)
+{
+    // NOTE(michiel): Should only be called after a statement evaluation. It saves all remaining symbols
+    // to their respective address
+    for (u32 index = 0; index < array_count(gUsableRegisters); ++index)
+    {
+        Register reg = gUsableRegisters[index];
+        if (is_register_used(assembler, reg))
+        {
+            AsmRegUser *user = assembler->registerUsers + (reg & 0xF);
+            i_expect(user->kind == AsmReg_Symbol);
+            save_symbol(assembler, user->symbol);
+            deallocate_register(assembler, reg);
+        }
+    }
+}
+
+internal AsmRegUser *
+allocate_register(Assembler *assembler, Register reg = Reg_None)
+{
+    Register targetReg = reg;
+    if ((reg == Reg_None) || is_register_used(assembler, reg))
+    {
+        //BitScanResult firstFree = find_least_significant_set_bit(assembler->freeRegisterMask);
+        BitScanResult firstFree = find_most_significant_set_bit(assembler->freeRegisterMask);
+        if (!firstFree.found)
+        {
+            b32 error = true;
+            // TODO(michiel): Check first if we can free up the requested reg
+            for (size_t i = 0; i < array_count(gUsableRegisters); i++) {
+                AsmRegUser *user = assembler->registerUsers + (gUsableRegisters[i] & 0xF);
+                i_expect(user->kind != AsmReg_None);
+                if ((user->kind == AsmReg_Symbol) &&
+                    !user->symbol->unsaved)
+                {
+                    i_expect(user->symbol->loadedRegister == gUsableRegisters[i]);
+                    targetReg = user->symbol->loadedRegister;
+                    user->symbol->loadedRegister = Reg_None;
+                    user->kind = AsmReg_None;
+                    assembler->freeRegisterMask |= 1 << (gUsableRegisters[i] & 0xF);
+                    error = false;
+                    break;
+                }
+            }
+            
+            if (error)
+            {
+                fprintf(stderr, "No free registers!!\n");
+                return 0;
+            }
+        }
+        else
+        {
+            targetReg = (Register)(Reg_RAX | firstFree.index);
+        }
+    }
+    
+    if ((reg != Reg_None) && (targetReg != reg))
+    {
+        i_expect(!is_register_used(assembler, targetReg));
+        emit_r_r(assembler, mov, targetReg, reg);
+        assembler->freeRegisterMask &= ~(1 << (targetReg & 0xF));
+        
+        AsmRegUser *oldUser = assembler->registerUsers + (reg & 0xF);
+        AsmRegUser *newUser = assembler->registerUsers + (targetReg & 0xF);
+        *newUser = *oldUser;
+        oldUser->kind = AsmReg_None;
+        
+        i_expect(newUser->reg == reg);
+        newUser->reg = targetReg;
+        if (newUser->kind == AsmReg_Symbol)
+        {
+            newUser->symbol->loadedRegister = targetReg;
+        }
+        
+        targetReg = reg;
+    }
+    
+    assembler->freeRegisterMask &= ~(1 << (targetReg & 0xF));
+    AsmRegUser *result = assembler->registerUsers + (targetReg & 0xF);
+    i_expect(result->kind == AsmReg_None);
+    result->kind = AsmReg_AllocatedReg;
+    result->reg  = targetReg;
+    
+    return result;
 }
 
 internal void
@@ -94,11 +178,25 @@ steal_operand_register(Assembler *assembler, AsmOperand *source, AsmOperand *des
 {
     i_expect((source->kind == AsmOperand_Register) || (source->kind == AsmOperand_LockedRegister));
     i_expect((dest->kind != AsmOperand_Register) && (dest->kind != AsmOperand_LockedRegister));
-    i_expect(assembler->registerUsage[source->oRegister & 0xF] == source);
+    
+    AsmRegUser *user = assembler->registerUsers + (source->oRegister & 0xF);
+    i_expect((user->kind == AsmReg_TempOperand) &&
+             (user->operand == source));
+    
     dest->kind = source->kind;
     dest->oRegister = source->oRegister;
     source->kind = AsmOperand_None;
-    assembler->registerUsage[dest->oRegister & 0xF] = dest;
+    
+    if (dest->symbol && dest->kind == AsmOperand_Register)
+    {
+        i_expect(dest->symbol->loadedRegister == Reg_None);
+        user->kind = AsmReg_Symbol;
+        user->symbol = dest->symbol;
+    }
+    else
+    {
+        user->operand = dest;
+    }
 }
 
 internal void
@@ -152,21 +250,29 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
             }
         } break;
         
+        case AsmOperand_None: {
+            // NOTE(michiel): Just reserve the register
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
-    assembler->registerUsage[targetReg & 0xF] = operand;
 }
 
 // NOTE(michiel): This will copy the register if it is a locked one
 internal void
-ensure_operand_has_register_for_dst(Assembler *assembler, AsmOperand *operand)
+ensure_operand_has_register_for_dst(Assembler *assembler, AsmOperand *operand, Register reg = Reg_None)
 {
-    if (operand->kind != AsmOperand_Register)
+    if ((operand->kind != AsmOperand_Register) ||
+        ((reg != Reg_None) && (reg != operand->oRegister)))
     {
-        Register operandReg = allocate_register(assembler);
-        emit_operand_to_register(assembler, operand, operandReg);
+        AsmRegUser *operandUsage = allocate_register(assembler, reg);
+        i_expect(operandUsage);
+        i_expect(operandUsage->reg != Reg_None);
+        operandUsage->kind = AsmReg_TempOperand;
+        operandUsage->operand = operand;
+        emit_operand_to_register(assembler, operand, operandUsage->reg);
         operand->kind = AsmOperand_Register;
-        operand->oRegister = operandReg;
+        operand->oRegister = operandUsage->reg;
     }
 }
 
@@ -177,10 +283,14 @@ ensure_operand_has_register_for_src(Assembler *assembler, AsmOperand *operand)
     if ((operand->kind != AsmOperand_Register) &&
         (operand->kind != AsmOperand_LockedRegister))
     {
-        Register operandReg = allocate_register(assembler);
-        emit_operand_to_register(assembler, operand, operandReg);
+        AsmRegUser *operandUsage = allocate_register(assembler);
+        i_expect(operandUsage);
+        i_expect(operandUsage->reg != Reg_None);
+        operandUsage->kind = AsmReg_TempOperand;
+        operandUsage->operand = operand;
+        emit_operand_to_register(assembler, operand, operandUsage->reg);
         operand->kind = AsmOperand_Register;
-        operand->oRegister = operandReg;
+        operand->oRegister = operandUsage->reg;
     }
 }
 
@@ -260,7 +370,9 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         else
         {
             i_expect((src->kind == AsmOperand_Register) || (src->kind == AsmOperand_LockedRegister));
-            emit_r_r(assembler, mov, dst->oRegister, src->oRegister);
+            if (dst->oRegister != src->oRegister) {
+                emit_r_r(assembler, mov, dst->oRegister, src->oRegister);
+            }
         }
     }
     else if (dst->kind == AsmOperand_FrameOffset)
@@ -466,57 +578,9 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         // 6. RDX is used, RAX not, dst == RDX  => alloc RAX, mov RAX RDX, mul, dealloc RDX, ret RAX
         // 7. RAX/RDX are used    , dst == RAX  => alloc REG, swap REG RDX, mul, swap REG RDX, dealloc REG, ret RAX
         // 8. RAX/RDX are used    , dst == RDX  => alloc REG, swap REG RAX, mov RAX RDX, mul, swap REG RAX, dealloc RDX, ret REG
-        if (!is_register_used(assembler, Reg_RAX))
-        {
-            Register rax = allocate_register(assembler, Reg_RAX);
-            emit_operand_to_register(assembler, dst, rax);
-            deallocate_operand(assembler, dst);
-            dst->kind = AsmOperand_Register;
-            dst->oRegister = rax;
-        }
-        else
-        {
-            ensure_operand_has_register_for_dst(assembler, dst);
-            if (dst->oRegister != Reg_RAX)
-            {
-                AsmOperand *offender = assembler->registerUsage[Reg_RAX & 0xF];
-                i_expect(offender);
-                i_expect((offender->kind == AsmOperand_Register) ||
-                         (offender->kind == AsmOperand_LockedRegister));
-                i_expect(offender->oRegister == Reg_RAX);
-                
-                if (offender->symbol && (offender->symbol->loadedRegister == Reg_RAX))
-                {
-                    offender->symbol->loadedRegister = dst->oRegister;
-                }
-                emit_r_r(assembler, xchg, dst->oRegister, offender->oRegister);
-                offender->oRegister = dst->oRegister;
-                dst->oRegister = Reg_RAX;
-                assembler->registerUsage[offender->oRegister & 0xF] = offender;
-            }
-        }
-        
-        if (is_register_used(assembler, Reg_RDX))
-        {
-            Register temp = allocate_register(assembler);
-            AsmOperand *offender = assembler->registerUsage[Reg_RDX & 0xF];
-            i_expect(offender);
-            i_expect((offender->kind == AsmOperand_Register) ||
-                     (offender->kind == AsmOperand_LockedRegister));
-            i_expect(offender->oRegister == Reg_RDX);
-            
-            if (offender->symbol && (offender->symbol->loadedRegister == Reg_RDX))
-            {
-                offender->symbol->loadedRegister = temp;
-            }
-            emit_r_r(assembler, xchg, temp, offender->oRegister);
-            offender->oRegister = temp;
-            assembler->registerUsage[offender->oRegister & 0xF] = offender;
-        }
-        else
-        {
-            allocate_register(assembler, Reg_RDX);
-        }
+        ensure_operand_has_register_for_dst(assembler, dst, Reg_RAX);
+        AsmOperand temp = {};
+        ensure_operand_has_register_for_dst(assembler, &temp, Reg_RDX);
         
         i_expect(dst->kind == AsmOperand_Register);
         i_expect(dst->oRegister == Reg_RAX);
@@ -525,9 +589,7 @@ emit_mul(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         
         emit_mul_kernel(assembler, src);
         
-        deallocate_register(assembler, Reg_RDX);
-        assembler->registerUsage[Reg_RAX & 0xF] = dst;
-        assembler->registerUsage[Reg_RDX & 0xF] = 0;
+        deallocate_operand(assembler, &temp);
     }
 }
 
@@ -568,58 +630,9 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
-        if (!is_register_used(assembler, Reg_RAX))
-        {
-            Register rax = allocate_register(assembler, Reg_RAX);
-            emit_operand_to_register(assembler, dst, rax);
-            deallocate_operand(assembler, dst);
-            dst->kind = AsmOperand_Register;
-            dst->oRegister = rax;
-        }
-        else
-        {
-            ensure_operand_has_register_for_dst(assembler, dst);
-            if (dst->oRegister != Reg_RAX)
-            {
-                AsmOperand *offender = assembler->registerUsage[Reg_RAX & 0xF];
-                i_expect(offender);
-                i_expect(offender != dst);
-                i_expect((offender->kind == AsmOperand_Register) ||
-                         (offender->kind == AsmOperand_LockedRegister));
-                i_expect(offender->oRegister == Reg_RAX);
-                
-                if (offender->symbol && (offender->symbol->loadedRegister == Reg_RAX))
-                {
-                    offender->symbol->loadedRegister = dst->oRegister;
-                }
-                emit_r_r(assembler, xchg, dst->oRegister, offender->oRegister);
-                offender->oRegister = dst->oRegister;
-                dst->oRegister = Reg_RAX;
-                assembler->registerUsage[offender->oRegister & 0xF] = offender;
-            }
-        }
-        
-        if (is_register_used(assembler, Reg_RDX))
-        {
-            Register temp = allocate_register(assembler);
-            AsmOperand *offender = assembler->registerUsage[Reg_RDX & 0xF];
-            i_expect(offender);
-            i_expect((offender->kind == AsmOperand_Register) ||
-                     (offender->kind == AsmOperand_LockedRegister));
-            i_expect(offender->oRegister == Reg_RDX);
-            
-            if (offender->symbol && (offender->symbol->loadedRegister == Reg_RDX))
-            {
-                offender->symbol->loadedRegister = temp;
-            }
-            emit_r_r(assembler, mov, temp, offender->oRegister);
-            offender->oRegister = temp;
-            assembler->registerUsage[temp & 0xF] = offender;
-        }
-        else
-        {
-            allocate_register(assembler, Reg_RDX);
-        }
+        ensure_operand_has_register_for_dst(assembler, dst, Reg_RAX);
+        AsmOperand temp = {};
+        ensure_operand_has_register_for_dst(assembler, &temp, Reg_RDX);
         
         i_expect(dst->kind == AsmOperand_Register);
         i_expect(dst->oRegister == Reg_RAX);
@@ -628,61 +641,7 @@ emit_div(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         
         emit_div_kernel(assembler, src);
         
-        deallocate_register(assembler, Reg_RDX);
-        assembler->registerUsage[Reg_RAX & 0xF] = dst;
-        assembler->registerUsage[Reg_RDX & 0xF] = 0;
-#if 0        
-        if (swapA)
-        {
-            // TODO(michiel): Find the operand that uses this and change it's register
-            ensure_operand_has_register_for_dst(assembler, dst);
-            emit_r_r(assembler, xchg, Reg_RAX, dst->oRegister);
-        }
-        else
-        {
-            Register rax = allocate_register(assembler, Reg_RAX);
-            emit_operand_to_register(assembler, dst, rax);
-            dst->kind = AsmOperand_Register;
-            dst->oRegister = rax;
-        }
-        
-        if (swapD)
-        {
-            // TODO(michiel): Find the operand that uses this and change it's register
-            tempD = allocate_register(assembler);
-            emit_r_r(assembler, xchg, Reg_RDX, tempD);
-        }
-        
-        b32 signedDiv = true;
-        emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
-        
-        if (src->kind == AsmOperand_FrameOffset)
-        {
-            emit_x_frame_offset(idiv, src->oFrameOffset);
-        }
-        else if (src->kind == AsmOperand_Address)
-        {
-            emit_x_ripd(assembler, idiv, 0);
-            patch_with_operand_address(assembler, 1, src);
-        }
-        else
-        {
-            ensure_operand_has_register_for_src(assembler, src);
-            emit_x_r(assembler, idiv, src->oRegister);
-        }
-        
-        if (swapD)
-        {
-            emit_r_r(assembler, xchg, Reg_RDX, tempD);
-            deallocate_register(assembler, tempD);
-        }
-        
-        if (swapA)
-        {
-            emit_r_r(assembler, xchg, Reg_RAX, dst->oRegister);
-        }
-#endif
-        
+        deallocate_operand(assembler, &temp);
     }
 }
 
@@ -701,132 +660,25 @@ emit_mod(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
     }
     else
     {
-        if (!is_register_used(assembler, Reg_RAX))
-        {
-            Register rax = allocate_register(assembler, Reg_RAX);
-            emit_operand_to_register(assembler, dst, rax);
-            deallocate_operand(assembler, dst);
-            dst->kind = AsmOperand_Register;
-            dst->oRegister = rax;
-        }
-        else
-        {
-            ensure_operand_has_register_for_dst(assembler, dst);
-            if (dst->oRegister != Reg_RAX)
-            {
-                AsmOperand *offender = assembler->registerUsage[Reg_RAX & 0xF];
-                i_expect(offender);
-                i_expect((offender->kind == AsmOperand_Register) ||
-                         (offender->kind == AsmOperand_LockedRegister));
-                i_expect(offender->oRegister == Reg_RAX);
-                
-                if (offender->symbol && (offender->symbol->loadedRegister == Reg_RAX))
-                {
-                    offender->symbol->loadedRegister = dst->oRegister;
-                }
-                emit_r_r(assembler, xchg, dst->oRegister, offender->oRegister);
-                offender->oRegister = dst->oRegister;
-                dst->oRegister = Reg_RAX;
-                assembler->registerUsage[offender->oRegister & 0xF] = offender;
-            }
-        }
-        
-        if (is_register_used(assembler, Reg_RDX))
-        {
-            Register temp = allocate_register(assembler);
-            AsmOperand *offender = assembler->registerUsage[Reg_RDX & 0xF];
-            i_expect(offender);
-            i_expect((offender->kind == AsmOperand_Register) ||
-                     (offender->kind == AsmOperand_LockedRegister));
-            i_expect(offender->oRegister == Reg_RDX);
-            
-            if (offender->symbol && (offender->symbol->loadedRegister == Reg_RDX))
-            {
-                offender->symbol->loadedRegister = temp;
-            }
-            emit_r_r(assembler, xchg, temp, offender->oRegister);
-            offender->oRegister = temp;
-            assembler->registerUsage[offender->oRegister & 0xF] = offender;
-        }
-        else
-        {
-            allocate_register(assembler, Reg_RDX);
-        }
+        ensure_operand_has_register_for_dst(assembler, dst, Reg_RAX);
+        AsmOperand temp = {};
+        ensure_operand_has_register_for_dst(assembler, &temp, Reg_RDX);
         
         i_expect(dst->kind == AsmOperand_Register);
         i_expect(dst->oRegister == Reg_RAX);
+        i_expect(temp.oRegister == Reg_RDX);
         i_expect(is_register_used(assembler, Reg_RAX));
         i_expect(is_register_used(assembler, Reg_RDX));
         
         emit_div_kernel(assembler, src);
         
-        deallocate_register(assembler, Reg_RAX);
-        dst->oRegister = Reg_RDX;
-        assembler->registerUsage[Reg_RAX & 0xF] = 0;
-        assembler->registerUsage[Reg_RDX & 0xF] = dst;
-        
-#if 0
-        b32 swapA = is_register_used(assembler, Reg_RAX);
-        b32 swapD = is_register_used(assembler, Reg_RDX);
-        Register tempD = Reg_None;
-        
-        if (swapA)
-        {
-            // TODO(michiel): Find the operand that uses this and change it's register
-            ensure_operand_has_register_for_dst(assembler, dst);
-            emit_r_r(assembler, xchg, Reg_RAX, dst->oRegister);
-        }
-        else
-        {
-            Register rax = allocate_register(assembler, Reg_RAX);
-            emit_operand_to_register(assembler, dst, rax);
-            dst->kind = AsmOperand_Register;
-            dst->oRegister = rax;
-        }
-        
-        if (swapD)
-        {
-            // TODO(michiel): Find the operand that uses this and change it's register
-            tempD = allocate_register(assembler);
-            emit_r_r(assembler, xchg, Reg_RDX, tempD);
-        }
-        else
-        {
-            tempD = allocate_register(assembler, Reg_RDX);
-        }
-        
-        b32 signedDiv = true;
-        emit_rax_extend(assembler, Reg_RAX, signedDiv); // NOTE(michiel): Extend rax to rdx
-        
-        if (src->kind == AsmOperand_FrameOffset)
-        {
-            emit_x_frame_offset(idiv, src->oFrameOffset);
-        }
-        else if (src->kind == AsmOperand_Address)
-        {
-            emit_x_ripd(assembler, idiv, 0);
-            patch_with_operand_address(assembler, 1, src);
-        }
-        else
-        {
-            ensure_operand_has_register_for_src(assembler, src);
-            emit_x_r(assembler, idiv, src->oRegister);
-        }
-        
-        if (swapD)
-        {
-            emit_r_r(assembler, xchg, Reg_RDX, tempD);
-        }
-        
-        if (swapA)
-        {
-            emit_r_r(assembler, xchg, Reg_RAX, dst->oRegister);
-        }
-        
         deallocate_operand(assembler, dst);
         dst->kind = AsmOperand_Register;
-        dst->oRegister = tempD;
-#endif
+        dst->oRegister = temp.oRegister;
+        AsmRegUser *user = assembler->registerUsers + (temp.oRegister & 0xF);
+        i_expect(user->reg == temp.oRegister);
+        user->kind = AsmReg_TempOperand;
+        user->operand = dst;
     }
 }
 
@@ -1012,13 +864,15 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
                     BinaryOpType op = expression->eBinary.op;
                     if (context == AsmExpr_ToValue)
                     {
-                        Register destReg = allocate_register(assembler);
-                        emit_r_r(assembler, xor, destReg, destReg);
+                        AsmRegUser *destReg = allocate_register(assembler);
+                        emit_r_r(assembler, xor, destReg->reg, destReg->reg);
                         result = emit_cmp(assembler, op, destination, &rightOp);
-                        emit_c_r(assembler, set, result, (Register)((destReg & 0xF) | Reg_AL));
+                        emit_c_r(assembler, set, result, (Register)((destReg->reg & 0xF) | Reg_AL));
                         deallocate_operand(assembler, destination);
                         destination->kind = AsmOperand_Register;
-                        destination->oRegister = destReg;
+                        destination->oRegister = destReg->reg;
+                        destReg->kind = AsmReg_TempOperand;
+                        destReg->operand = destination;
                     }
                     else
                     {
@@ -1040,17 +894,14 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
 
 internal void emit_stmt_block(Assembler *assembler, StmtBlock *block);
 
-internal AsmStatementResult
-emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult prevResult)
+internal void
+emit_statement(Assembler *assembler, Statement *statement)
 {
-    AsmStatementResult result = {};
     switch (statement->kind)
     {
         case Stmt_Assign: {
             if (statement->sAssign.left->kind == Expr_Identifier)
             {
-                AsmOperand destination = {};
-                AsmOperand source = {};
                 AsmSymbol *leftSym = find_symbol(assembler, statement->sAssign.left->eName);
                 if (!leftSym)
                 {
@@ -1058,33 +909,27 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                 }
                 i_expect(leftSym);
                 
-                AsmOperand origDest = leftSym->operand;
-                if (prevResult.symbol)
+                AsmOperand source = {};
+                emit_expression(assembler, statement->sAssign.right, &source, AsmExpr_ToValue);
+                
+                AsmOperand destination = {};
+                if (leftSym->loadedRegister)
                 {
-                    // NOTE(michiel): We had a previous result, if this is not to the same variable,
-                    // than write out the previous result. Otherwise reuse the result register.
-                    if (prevResult.symbol == leftSym)
-                    {
-                        destination = prevResult.result;
-                    }
-                    else
-                    {
-                        emit_mov(assembler, &prevResult.original, &prevResult.result);
-                        deallocate_operand(assembler, &prevResult.result);
-                        prevResult.symbol->loadedRegister = Reg_None;
-                        destination = leftSym->operand;
-                    }
+                    i_expect(is_register_used(assembler, leftSym->loadedRegister));
+                    destination.kind = AsmOperand_Register;
+                    destination.oRegister = leftSym->loadedRegister;
+                    destination.symbol = leftSym;
                 }
                 else
                 {
                     destination = leftSym->operand;
                 }
+                AsmOperand origDest = destination;
                 
-                //emit_expression(assembler, statement->assign.left, &destination, AsmExpr_ToValue);
-                emit_expression(assembler, statement->sAssign.right, &source, AsmExpr_ToValue);
                 switch (statement->sAssign.op)
                 {
-                    //case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
+                    case Assign_Set: { emit_mov(assembler, &destination, &source); } break;
+#if 0
                     case Assign_Set: {
                         if ((destination.kind == AsmOperand_Register) &&
                             (source.kind == AsmOperand_Register))
@@ -1100,6 +945,7 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                             emit_mov(assembler, &destination, &source);
                         }
                     } break;
+#endif
                     case Assign_Add: { emit_add(assembler, &destination, &source); } break;
                     case Assign_Sub: { emit_sub(assembler, &destination, &source); } break;
                     case Assign_Mul: { emit_mul(assembler, &destination, &source); } break;
@@ -1108,19 +954,21 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
                     INVALID_DEFAULT_CASE;
                 }
                 
-                if (origDest != destination)
+                leftSym->unsaved |= origDest != destination;
+                if ((destination.kind == AsmOperand_Register) || (destination.kind == AsmOperand_LockedRegister))
                 {
-                    result.symbol = leftSym;
-                    result.original = origDest;
-                    result.result = destination;
-                    if (destination.kind == AsmOperand_Register)
+                    leftSym->loadedRegister = destination.oRegister;
+                    AsmRegUser *regUsage = assembler->registerUsers + (destination.oRegister & 0xF);
+                    if (regUsage->kind == AsmReg_Symbol)
                     {
-                        result.symbol->loadedRegister = destination.oRegister;
+                        i_expect(regUsage->symbol == leftSym);
                     }
                     else
                     {
-                        i_expect(destination.kind != AsmOperand_LockedRegister);
-                        result.symbol->loadedRegister = Reg_None;
+                        i_expect(regUsage->kind == AsmReg_TempOperand);
+                        i_expect(regUsage->operand == &destination);
+                        regUsage->kind = AsmReg_Symbol;
+                        regUsage->symbol = leftSym;
                     }
                 }
                 
@@ -1129,13 +977,6 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
             else
             {
                 ast_assemble_error(statement->origin, "Left side of assignment must be an identifier.\n");
-#if 0                
-                fprintf(stderr, "\nERRROROORROROROORRRR:\nMichiel moet dit nog doen...\n\n");
-                FileStream errors = {};
-                errors.file = gFileApi->open_file(string("stderr"), FileOpen_Write);
-                print_statement(&errors, statement);
-                fprintf(stderr, "\n");
-#endif
             }
         } break;
         
@@ -1146,18 +987,20 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
             if (expr)
             {
                 emit_expression(assembler, expr, &destination, AsmExpr_ToValue);
+                
+                if (is_register_used(assembler, Reg_RAX) &&
+                    ((destination.kind == AsmOperand_Register) || (destination.kind == AsmOperand_LockedRegister)) &&
+                    (destination.oRegister != Reg_RAX))
+                {
+                    AsmRegUser *offender = assembler->registerUsers + (Reg_RAX & 0xF);
+                    i_expect(offender->kind == AsmReg_Symbol);
+                    save_symbol(assembler, offender->symbol);
+                    deallocate_register(assembler, Reg_RAX);
+                }
                 emit_operand_to_register(assembler, &destination, Reg_RAX);
             }
             
-            // NOTE(michiel): Most of the time we return something that has been calculated just before, so
-            // this mov after the return expression will make sure the return expression can use the cached
-            // register value of the previous line.
-            if (prevResult.symbol)
-            {
-                emit_mov(assembler, &prevResult.original, &prevResult.result);
-                deallocate_operand(assembler, &prevResult.result);
-                prevResult.symbol->loadedRegister = Reg_None;
-            }
+            save_all_registers(assembler);
             
             //emit_pop(assembler, Reg_EBP);
             emit_ret(assembler);
@@ -1167,17 +1010,6 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
         case Stmt_IfElse: {
             // TODO(michiel): Cache last compare
             AsmOperand destination = {};
-            
-#if 1
-            // TODO(michiel): Skip this maybe?
-            if (prevResult.symbol)
-            {
-                emit_mov(assembler, &prevResult.original, &prevResult.result);
-                deallocate_operand(assembler, &prevResult.result);
-                prevResult.symbol->loadedRegister = Reg_None;
-            }
-#endif
-            
             ConditionCode cc = emit_expression(assembler, statement->sIf.ifBlock.condition, &destination, AsmExpr_ToCompare);
             deallocate_operand(assembler, &destination);
             i_expect(cc != CC_Invalid);
@@ -1265,24 +1097,27 @@ emit_statement(Assembler *assembler, Statement *statement, AsmStatementResult pr
         
         INVALID_DEFAULT_CASE;
     }
-    
-    return result;
 }
 
 internal void
 emit_stmt_block(Assembler *assembler, StmtBlock *block)
 {
     u32 localScopeAt = assembler->localCount;
-    AsmStatementResult prevResult = {};
+    u32 freeRegisters = assembler->freeRegisterMask;
     for (u32 stmtIdx = 0; stmtIdx < block->stmtCount; ++stmtIdx)
     {
-        prevResult = emit_statement(assembler, block->statements[stmtIdx], prevResult);
+        emit_statement(assembler, block->statements[stmtIdx]);
     }
-    if (prevResult.original.kind != AsmOperand_None)
+    u32 usedRegisters = ~assembler->freeRegisterMask & freeRegisters;
+    for (u32 reg = Reg_RAX; reg <= Reg_R15; ++reg)
     {
-        emit_mov(assembler, &prevResult.original, &prevResult.result);
-        deallocate_operand(assembler, &prevResult.result);
-        prevResult.symbol->loadedRegister = Reg_None;
+        if (usedRegisters & (1 << (reg & 0xF)))
+        {
+            AsmRegUser *user = assembler->registerUsers + (reg & 0xF);
+            i_expect(user->kind == AsmReg_Symbol);
+            save_symbol(assembler, user->symbol);
+            deallocate_register(assembler, user->reg);
+        }
     }
     assembler->localCount = localScopeAt;
 }
