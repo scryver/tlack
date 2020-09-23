@@ -72,6 +72,7 @@ struct AsmRegUser
 {
     AsmRegUseKind kind;
     Register      reg;  // TODO(michiel): Maybe not needed??
+    b32           hold;
     union {
         AsmSymbol  *symbol;
         AsmOperand *operand;

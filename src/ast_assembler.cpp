@@ -23,20 +23,20 @@ ast_assemble_error(SourcePos origin, char *fmt, ...)
     va_end(args);
 }
 
-#define emit_r_frame_offset(op, offset, dst) \
+#define emit_r_frame_offset(a, op, offset, dst) \
 if (is_8bit(offset)) { \
-emit_r_mb(assembler, op, dst, Reg_RBP, (offset)); \
+emit_r_mb(a, op, dst, Reg_RBP, (offset)); \
 } else { \
 i_expect(is_32bit(offset)); \
-emit_r_md(assembler, op, dst, Reg_RBP, (offset)); \
+emit_r_md(a, op, dst, Reg_RBP, (offset)); \
 }
 
-#define emit_x_frame_offset(op, offset) \
+#define emit_x_frame_offset(a, op, offset) \
 if (is_8bit(offset)) { \
-emit_x_mb(assembler, op, Reg_RBP, (offset)); \
+emit_x_mb(a, op, Reg_RBP, (offset)); \
 } else { \
 i_expect(is_32bit(offset)); \
-emit_x_md(assembler, op, Reg_RBP, (offset)); \
+emit_x_md(a, op, Reg_RBP, (offset)); \
 }
 
 // TODO(michiel): Add RAX and RDX and check usage in div/mul, maybe use a OC_XchgRMtoR to swap them if needed
@@ -66,12 +66,16 @@ deallocate_register(Assembler *assembler, Register oldReg)
     //fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
     i_expect((assembler->freeRegisterMask & (1 << (oldReg & 0xF))) == 0);
     assembler->freeRegisterMask |= (1 << (oldReg & 0xF));
-    if (assembler->registerUsers[oldReg & 0xF].kind == AsmReg_Symbol)
+    AsmRegUser *user = assembler->registerUsers + (oldReg & 0xF);
+    if (user->kind == AsmReg_Symbol)
     {
-        AsmSymbol *symbol = assembler->registerUsers[oldReg & 0xF].symbol;
+        AsmSymbol *symbol = user->symbol;
+        i_expect(symbol);
         symbol->loadedRegister = Reg_None;
     }
-    assembler->registerUsers[oldReg & 0xF].kind = AsmReg_None;
+    user->kind = AsmReg_None;
+    user->hold = false;
+    user->symbol = 0;
 }
 
 internal void
@@ -144,6 +148,7 @@ allocate_register(Assembler *assembler, Register reg = Reg_None)
                 AsmRegUser *user = assembler->registerUsers + (gUsableRegisters[i] & 0xF);
                 i_expect(user->kind != AsmReg_None);
                 if ((user->kind == AsmReg_Symbol) &&
+                    !user->hold &&
                     !user->symbol->unsaved)
                 {
                     i_expect(user->symbol->loadedRegister == gUsableRegisters[i]);
@@ -161,7 +166,7 @@ allocate_register(Assembler *assembler, Register reg = Reg_None)
                 for (size_t i = 0; i < array_count(gUsableRegisters); i++) {
                     AsmRegUser *user = assembler->registerUsers + (gUsableRegisters[i] & 0xF);
                     i_expect(user->kind != AsmReg_None);
-                    if (user->kind == AsmReg_Symbol)
+                    if (user->kind == AsmReg_Symbol && !user->hold)
                     {
                         i_expect(user->symbol->loadedRegister == gUsableRegisters[i]);
                         save_symbol(assembler, user->symbol);
@@ -274,7 +279,7 @@ emit_operand_to_register(Assembler *assembler, AsmOperand *operand, Register tar
         } break;
         
         case AsmOperand_FrameOffset: {
-            emit_r_frame_offset(mov, operand->oFrameOffset, targetReg);
+            emit_r_frame_offset(assembler, mov, operand->oFrameOffset, targetReg);
         } break;
         
         case AsmOperand_Address: {
@@ -423,7 +428,7 @@ emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
         }
         else if (src->kind == AsmOperand_FrameOffset)
         {
-            emit_r_frame_offset(mov, src->oFrameOffset, dst->oRegister);
+            emit_r_frame_offset(assembler, mov, src->oFrameOffset, dst->oRegister);
         }
         else if (src->kind == AsmOperand_Address)
         {
@@ -522,7 +527,7 @@ emit_add(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             } break;
             
             case AsmOperand_FrameOffset: {
-                emit_r_frame_offset(add, src->oFrameOffset, dst->oRegister);
+                emit_r_frame_offset(assembler, add, src->oFrameOffset, dst->oRegister);
             } break;
             
             case AsmOperand_Address: {
@@ -576,7 +581,7 @@ emit_sub(Assembler *assembler, AsmOperand *dst, AsmOperand *src)
             } break;
             
             case AsmOperand_FrameOffset: {
-                emit_r_frame_offset(sub, src->oFrameOffset, dst->oRegister);
+                emit_r_frame_offset(assembler, sub, src->oFrameOffset, dst->oRegister);
             } break;
             
             case AsmOperand_Address: {
@@ -599,7 +604,7 @@ emit_mul_kernel(Assembler *assembler, AsmOperand *src)
 {
     if (src->kind == AsmOperand_FrameOffset)
     {
-        emit_x_frame_offset(imul, src->oFrameOffset);
+        emit_x_frame_offset(assembler, imul, src->oFrameOffset);
     }
     else if (src->kind == AsmOperand_Address)
     {
@@ -664,7 +669,7 @@ emit_div_kernel(Assembler *assembler, AsmOperand *src)
     
     if (src->kind == AsmOperand_FrameOffset)
     {
-        emit_x_frame_offset(idiv, src->oFrameOffset);
+        emit_x_frame_offset(assembler, idiv, src->oFrameOffset);
     }
     else if (src->kind == AsmOperand_Address)
     {
@@ -804,7 +809,7 @@ emit_cmp(Assembler *assembler, BinaryOpType op, AsmOperand *dst, AsmOperand *src
             } break;
             
             case AsmOperand_FrameOffset: {
-                emit_r_frame_offset(cmp, src->oFrameOffset, dst->oRegister);
+                emit_r_frame_offset(assembler, cmp, src->oFrameOffset, dst->oRegister);
             } break;
             
             case AsmOperand_Address: {
@@ -1180,6 +1185,62 @@ emit_statement(Assembler *assembler, Statement *statement)
             emit_c_i(assembler, j, cc, 0);
             s32 diff = doStart - assembler->codeAt;
             *(s32 *)(assembler->codeData.data + assembler->codeAt - 4) = diff;
+        } break;
+        
+        case Stmt_For: {
+            // TODO(michiel): Special case this and keep the loop counter in a reg??
+            i_expect(statement->sFor.init->kind == Stmt_Assign);
+            emit_statement(assembler, statement->sFor.init);
+            
+            AsmSymbol *counterSym = find_symbol(assembler, statement->sFor.init->sAssign.left->eName);
+            AsmOperand counter = {};
+            i_expect(counterSym);
+            if (counterSym->loadedRegister == Reg_None)
+            {
+                counter = counterSym->operand;
+                ensure_operand_has_register_for_dst(assembler, &counter);
+                counterSym->loadedRegister = counter.oRegister;
+                counterSym->unsaved = true;
+            }
+            else
+            {
+                counter.kind = AsmOperand_Register;
+                counter.oRegister = counterSym->loadedRegister;
+            }
+            
+            AsmRegUser *counterUse = assembler->registerUsers + (counter.oRegister & 0xF);
+            i_expect(counterUse->kind == AsmReg_TempOperand);
+            i_expect(counterUse->reg == counterSym->loadedRegister);
+            counterUse->kind = AsmReg_Symbol;
+            counterUse->hold = true;
+            counterUse->symbol = counterSym;
+            
+            emit_i(assembler, jmp, 0);
+            u32 forStart = assembler->codeAt;
+            emit_stmt_block(assembler, statement->sFor.body);
+            
+            i_expect(statement->sFor.next->kind == Stmt_Assign);
+            emit_statement(assembler, statement->sFor.next);
+            AsmSymbol *nextSym = find_symbol(assembler, statement->sFor.next->sAssign.left->eName);
+            i_expect(nextSym == counterSym);
+            i_expect(nextSym->loadedRegister != Reg_None);
+            
+            s32 jmpTo = assembler->codeAt - forStart;
+            *(s32 *)(assembler->codeData.data + forStart - 4) = jmpTo;
+            
+            AsmOperand condResult = {};
+            ConditionCode cc = emit_expression(assembler, statement->sFor.condition, &condResult, AsmExpr_ToCompare);
+            deallocate_operand(assembler, &condResult);
+            i_expect(cc != CC_Invalid);
+            emit_c_i(assembler, j, cc, 0);
+            s32 diff = forStart - assembler->codeAt;
+            *(s32 *)(assembler->codeData.data + assembler->codeAt - 4) = diff;
+            
+            // TODO(michiel): Do we need to save the counter?
+            // If we should implement different type of for loops than we could do without, it would be
+            // a register value only.
+            save_symbol(assembler, counterSym);
+            deallocate_register(assembler, counterSym->loadedRegister);
         } break;
         
         INVALID_DEFAULT_CASE;

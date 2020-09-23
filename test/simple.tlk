@@ -75,6 +75,16 @@ func main()
         test += 0x100;
     }
 
+    a = test;
+    // for (0 .. 10) TODO(michiel): different for loops
+    // for (x: 0 .. 10) // default name is 'it'
+    // for (0 .. 10 : 3) // increment in steps of 3
+    // for (objects and pointers) uhhhhhh, todo?
+    for (x = 0; x < 9; x += 1)
+    {
+        test += a;
+    }
+
     test = test + b + c + d + e + f + g;
     //return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
     return test;

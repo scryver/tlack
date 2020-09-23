@@ -106,8 +106,19 @@ internal Statement *
 create_while_stmt(Ast *ast, Expression *cond, StmtBlock *block)
 {
     Statement *result = allocate_statement(ast, Stmt_While);
-    result->sDo.condition = cond;
-    result->sDo.block = block;
+    result->sWhile.condition = cond;
+    result->sWhile.block = block;
+    return result;
+}
+
+internal Statement *
+create_for_stmt(Ast *ast, Statement *init, Expression *cond, Statement *next, StmtBlock *block)
+{
+    Statement *result = allocate_statement(ast, Stmt_For);
+    result->sFor.init = init;
+    result->sFor.condition = cond;
+    result->sFor.next = next;
+    result->sFor.body = block;
     return result;
 }
 
@@ -267,6 +278,20 @@ print_statement(FileStream *output, Statement *statement)
             ++output->indent;
             print_stmt_block(output, statement->sWhile.block);
             --output->indent;
+            println(output, ")");
+        } break;
+        
+        case Stmt_For: {
+            println(output, "(for");
+            ++output->indent;
+            print_statement(output, statement->sFor.init);
+            println_begin(output, "");
+            print_expression(output, statement->sFor.condition);
+            println_end(output, "");
+            print_statement(output, statement->sFor.next);
+            print_stmt_block(output, statement->sFor.body);
+            --output->indent;
+            println(output, ")");
         } break;
         
         INVALID_DEFAULT_CASE;

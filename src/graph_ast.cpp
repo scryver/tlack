@@ -188,6 +188,30 @@ graph_ast_statement(Ast *ast, FileStream *output, Statement *statement, String c
             graph_ast_stmt_block(ast, output, statement->sDo.block, blockStr);
         } break;
         
+        case Stmt_For: {
+            graph_label(output, stmtStr, "for");
+            
+            String initStr = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "forinit%p", statement);
+            graph_label(output, initStr, "init");
+            graph_dash_connect(output, stmtStr, initStr);
+            graph_ast_statement(ast, output, statement->sFor.init, initStr);
+            
+            String condStr = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "forcond%p", statement);
+            graph_label(output, condStr, "cond");
+            graph_dash_connect(output, stmtStr, condStr);
+            graph_ast_expression(ast, output, statement->sFor.condition, condStr);
+            
+            String nextStr = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "fornext%p", statement);
+            graph_label(output, nextStr, "next");
+            graph_dash_connect(output, stmtStr, nextStr);
+            graph_ast_statement(ast, output, statement->sFor.next, nextStr);
+            
+            String blockStr = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "forbody%p", statement);
+            graph_label(output, blockStr, "then");
+            graph_dash_connect(output, stmtStr, blockStr);
+            graph_ast_stmt_block(ast, output, statement->sFor.body, blockStr);
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
     

@@ -157,14 +157,16 @@ parse_expression(Tokenizer *tokenizer, Ast *ast)
 internal StmtBlock *parse_statement_block(Tokenizer *tokenizer, Ast *ast);
 
 internal Statement *
-parse_statement(Tokenizer *tokenizer, Ast *ast)
+parse_statement(Tokenizer *tokenizer, Ast *ast, b32 expectEnd = true)
 {
     Statement *result = 0;
     Token base = expect_token(tokenizer, Token_Name);
     if (base.value == string("return"))
     {
         Expression *returnExpr = parse_expression(tokenizer, ast);
-        expect_token(tokenizer, Token_SemiColon);
+        if (expectEnd) {
+            expect_token(tokenizer, Token_SemiColon);
+        }
         result = create_return_stmt(ast, returnExpr);
     }
     else if (base.value == string("if"))
@@ -211,6 +213,23 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
         StmtBlock *whileBlock = parse_statement_block(tokenizer, ast);
         result = create_while_stmt(ast, whileCond, whileBlock);
     }
+    else if (base.value == string("for"))
+    {
+        expect_token(tokenizer, Token_ParenOpen);
+        Statement *init = parse_statement(tokenizer, ast, false);
+        i_expect(init->kind == Stmt_Assign);
+        expect_token(tokenizer, Token_SemiColon);
+        strip_newlines(tokenizer);
+        Expression *cond = parse_expression(tokenizer, ast);
+        expect_token(tokenizer, Token_SemiColon);
+        strip_newlines(tokenizer);
+        Statement *next = parse_statement(tokenizer, ast, false);
+        i_expect(next->kind == Stmt_Assign);
+        expect_token(tokenizer, Token_ParenClose);
+        strip_newlines(tokenizer);
+        StmtBlock *body = parse_statement_block(tokenizer, ast);
+        result = create_for_stmt(ast, init, cond, next, body);
+    }
     else
     {
         AssignOpType opType = Assign_None;
@@ -227,7 +246,9 @@ parse_statement(Tokenizer *tokenizer, Ast *ast)
             INVALID_DEFAULT_CASE;
         }
         Expression *right = parse_expression(tokenizer, ast);
-        expect_token(tokenizer, Token_SemiColon);
+        if (expectEnd) {
+            expect_token(tokenizer, Token_SemiColon);
+        }
         result = create_assign_stmt(ast, opType, left, right);
     }
     result->origin = base.origin;

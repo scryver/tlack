@@ -111,6 +111,14 @@ struct IfElse
     StmtBlock      *elseBlock;
 };
 
+struct ForLoop
+{
+    Statement  *init;
+    Expression *condition;
+    Statement  *next;
+    StmtBlock  *body;
+};
+
 enum StmtKind
 {
     Stmt_None,
@@ -119,6 +127,7 @@ enum StmtKind
     Stmt_IfElse,
     Stmt_DoWhile,
     Stmt_While,
+    Stmt_For,
 };
 struct Statement
 {
@@ -131,6 +140,7 @@ struct Statement
         IfElse         sIf;
         ConditionBlock sDo;
         ConditionBlock sWhile;
+        ForLoop        sFor;
     };
 };
 
