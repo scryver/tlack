@@ -965,15 +965,19 @@ emit_statement(Assembler *assembler, Statement *statement)
         case Stmt_Assign: {
             if (statement->sAssign.left->kind == Expr_Identifier)
             {
+                AsmOperand source = {};
+                emit_expression(assembler, statement->sAssign.right, &source, AsmExpr_ToValue);
+                
                 AsmSymbol *leftSym = find_symbol(assembler, statement->sAssign.left->eName);
                 if (!leftSym)
                 {
-                    leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->sAssign.left->eName);
+                    if (statement->sAssign.op == Assign_Set) {
+                        leftSym = create_local_sym(assembler, AsmSymbol_Var, statement->sAssign.left->eName);
+                    } else {
+                        ast_assemble_error(statement->origin, "'%.*s' not previously declared.\n", STR_FMT(statement->sAssign.left->eName));
+                    }
                 }
                 i_expect(leftSym);
-                
-                AsmOperand source = {};
-                emit_expression(assembler, statement->sAssign.right, &source, AsmExpr_ToValue);
                 
                 AsmOperand destination = {};
                 if (leftSym->loadedRegister)
@@ -1073,7 +1077,10 @@ emit_statement(Assembler *assembler, Statement *statement)
                 {
                     AsmRegUser *offender = assembler->registerUsers + (Reg_RAX & 0xF);
                     i_expect(offender->kind == AsmReg_Symbol);
-                    save_symbol(assembler, offender->symbol);
+                    if (offender->symbol->operand.kind != AsmOperand_FrameOffset) {
+                        i_expect(offender->symbol->operand.kind == AsmOperand_Address);
+                        save_symbol(assembler, offender->symbol);
+                    }
                     deallocate_register(assembler, Reg_RAX);
                 }
                 emit_operand_to_register(assembler, &destination, Reg_RAX);

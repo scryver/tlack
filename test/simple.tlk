@@ -33,7 +33,11 @@ func main()
     f -= j + k;
     g += i;
     h -= h;
+    l = 0;
     l += j;
+    o = 0;
+    p = 0;
+    q = 0;
     o -= i;
     p += j;
     q += o;
