@@ -15,6 +15,38 @@ func main()
     e = test > hallo;
     f = test <= hallo;
     g = test >= hallo;
+    h = test - hallo;
+    i = test + hallo;
+    j = test * hallo;
+    k = test / hallo;
+    k += j;
+    k -= i;
+    i += j;
+    j += k;
+    i -= j + k;
+    h += i;
+    g -= h;
+    b += j;
+    c -= i;
+    d += j;
+    e += k;
+    f -= j + k;
+    g += i;
+    h -= h;
+    l += j;
+    o -= i;
+    p += j;
+    q += o;
+    i -= p + k;
+    h += q;
+    j -= h;
+    b += q;
+    c -= p;
+    d += o;
+    e += k;
+    f -= j + k;
+    g += i;
+    h -= h;
     if (test == hallo)
     {
         test = 0x20;
@@ -39,7 +71,7 @@ func main()
         test += 0x100;
     }
 
-    //test = b + c + d + e + f + g;
+    test = test + b + c + d + e + f + g;
     //return 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5 - test - 2 + test - test + test - test + test;
     return test;
 }
