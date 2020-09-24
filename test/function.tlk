@@ -1,0 +1,38 @@
+func fibrecurse(n)
+{
+    result = 0;
+
+    if (n <= 1)
+    {
+        result = 1;
+    }
+    else
+    {
+        //result = fibrecurse(n - 1) + fibrecurse(n - 2);
+        result = fibrecurse(n - 2) + fibrecurse(n - 1);
+    }
+
+    return result;
+}
+
+func fibiter(n)
+{
+    result = 1;
+    prev = 0;
+
+    for (x = 0; x < n; x += 1)
+    {
+        temp = result;
+        result += prev;
+        prev = temp;
+    }
+
+    return result;
+}
+
+func main()
+{
+    henk = fibrecurse(10);
+    //henk = fibiter(10);
+    return henk;
+}
