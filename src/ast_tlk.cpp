@@ -22,8 +22,31 @@ parse_base(Tokenizer *tokenizer, Ast *ast)
     }
     else if (token.kind == Token_Name)
     {
-        result = create_identifier(ast, token.value);
-        result->origin = token.origin;
+        String name = token.value;
+        SourcePos origin = token.origin;
+        if (match_token(tokenizer, Token_ParenOpen))
+        {
+            Expression **arguments = 0;
+            if (match_token(tokenizer, Token_ParenClose))
+            {
+                // NOTE(michiel): Do nothing
+            }
+            else
+            {
+                do {
+                    Expression *expr = parse_expression(tokenizer, ast);
+                    mbuf_push(arguments, expr);
+                } while (match_token(tokenizer, Token_Comma));
+                expect_token(tokenizer, Token_ParenClose);
+            }
+            
+            result = create_func_call(ast, name, mbuf_count(arguments), arguments);
+        }
+        else
+        {
+            result = create_identifier(ast, name);
+        }
+        result->origin = origin;
     }
     else if (token.kind == Token_ParenOpen)
     {
@@ -230,6 +253,33 @@ parse_statement(Tokenizer *tokenizer, Ast *ast, b32 expectEnd = true)
         StmtBlock *body = parse_statement_block(tokenizer, ast);
         result = create_for_stmt(ast, init, cond, next, body);
     }
+    else if (base.value == string("func"))
+    {
+        Token name = expect_token(tokenizer, Token_Name);
+        Token token = expect_token(tokenizer, Token_ParenOpen);
+        
+        String *arguments = 0;
+        if (match_token(tokenizer, Token_ParenClose))
+        {
+            // NOTE(michiel): Do nothing
+        }
+        else
+        {
+            do
+            {
+                token = expect_token(tokenizer, Token_Name);
+                mbuf_push(arguments, token.value);
+            } while (match_token(tokenizer, Token_Comma));
+            expect_token(tokenizer, Token_ParenClose);
+        }
+        
+        strip_newlines(tokenizer);
+        
+        StmtBlock *stmtBody = parse_statement_block(tokenizer, ast);
+        
+        result = create_func_stmt(ast, name.value, mbuf_count(arguments), arguments, stmtBody);
+        mbuf_deallocate(arguments);
+    }
     else
     {
         AssignOpType opType = Assign_None;
@@ -279,29 +329,6 @@ parse_statement_block(Tokenizer *tokenizer, Ast *ast)
     return result;
 }
 
-internal Function *
-parse_function(Tokenizer *tokenizer, Ast *ast)
-{
-    SourcePos origin = tokenizer->origin;
-    expect_name(tokenizer, static_string("func"));
-    Token name = expect_token(tokenizer, Token_Name);
-    Token token = expect_token(tokenizer, Token_ParenOpen);
-    do
-    {
-        token = get_token(tokenizer);
-    } while ((token.kind != Token_ParenClose) && (token.kind != Token_EOF));
-    i_expect(token.kind == Token_ParenClose);
-    
-    strip_newlines(tokenizer);
-    
-    StmtBlock *stmtBody = parse_statement_block(tokenizer, ast);
-    
-    Function *result = create_function(ast, name.value, stmtBody);
-    result->origin = origin;
-    return result;
-}
-
-
 internal void
 ast_from_tlk(Ast *ast, String filename, String text)
 {
@@ -311,9 +338,20 @@ ast_from_tlk(Ast *ast, String filename, String text)
     tokenizer.origin.column = 1;
     tokenizer.scanner = text;
     
-    strip_newlines(&tokenizer);
-    Function *mainFunc = parse_function(&tokenizer, ast);
-    i_expect(mainFunc->name == string("main"));
+    Statement **functions = 0;
     
-    ast->program.main = mainFunc;
+    Token peekFunc = peek_token(&tokenizer);
+    while ((peekFunc.kind != Token_EOF) && (peekFunc.kind == Token_Name) && (peekFunc.value == string("func")))
+    {
+        Statement *funcStmt = parse_statement(&tokenizer, ast);
+        mbuf_push(functions, funcStmt);
+        strip_newlines(&tokenizer);
+        peekFunc = peek_token(&tokenizer);
+    }
+    
+    ast->program.functionCount = mbuf_count(functions);
+    ast->program.functionStmts = (Statement **)ast_allocate(ast, mbuf_count(functions)*sizeof(Statement *));
+    copy(mbuf_count(functions)*sizeof(Statement *), functions, ast->program.functionStmts);
+    
+    mbuf_deallocate(functions);
 }

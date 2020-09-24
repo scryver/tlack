@@ -85,7 +85,7 @@ make_executable(Buffer buffer, umm offset)
 #include "graph_ast.cpp"
 
 #define FUNC_CALL(name)   u64 name(void)
-typedef FUNC_CALL(FuncCall);
+typedef FUNC_CALL(AsmFuncCall);
 
 internal void
 dump_code(Assembler *assembler, String filename)
@@ -162,10 +162,10 @@ test_emitter(Assembler *assembler)
     emit_c_r(assembler, set, CC_NoOverflow, Reg_AH);
     emit_c_r(assembler, set, CC_Below, Reg_CL);
     emit_c_r(assembler, set, CC_NotBelow, Reg_CH);
-    emit_c_r(assembler, set, CC_Equal, Reg_SPL);    // TODO(michiel): This is AH now
-    emit_c_r(assembler, set, CC_NotEqual, Reg_BPL); // TODO(michiel): This is CH now
-    emit_c_r(assembler, set, CC_NotAbove, Reg_SIL); // TODO(michiel): This is DH now
-    emit_c_r(assembler, set, CC_Above, Reg_DIL);    // TODO(michiel): This is BH now
+    emit_c_r(assembler, set, CC_Equal, Reg_SPL);
+    emit_c_r(assembler, set, CC_NotEqual, Reg_BPL);
+    emit_c_r(assembler, set, CC_NotAbove, Reg_SIL);
+    emit_c_r(assembler, set, CC_Above, Reg_DIL);
     emit_c_r(assembler, set, CC_Sign, Reg_R8D);
     emit_c_r(assembler, set, CC_NoSign, Reg_R9D);
     emit_c_r(assembler, set, CC_Parity, Reg_R10D);
@@ -187,7 +187,7 @@ test_simple_bytes(MemoryAllocator *allocator)
     
     if (make_executable(assembler->codeData, 0))
     {
-        FuncCall *func = (FuncCall *)assembler->codeData.data;
+        AsmFuncCall *func = (AsmFuncCall *)assembler->codeData.data;
         u64 x = func();
         fprintf(stdout, "Got 0x%016lX | %ld\n", x, x);
     }
@@ -215,54 +215,24 @@ s32 main(s32 argc, char **argv)
     
     Assembler *assembler = create_assembler(&defaultAlloc, megabytes(1ULL), kilobytes(4));
     
-    //test_emitter(assembler);
+#if 0    
+    test_emitter(assembler);
+    dump_code(assembler, string("test.bin"));
+    return 0;
+#endif
+    
     i_expect(assembler->codeAt < (assembler->codeData.size - 0x1000));
     assembler->codeAt = (assembler->codeAt + 0xFFF) & ~0xFFF;
     
     Ast mainAst = {};
-#if 1
+    
     String langName = static_string("test/simple.tlk");
+    if (argc > 1)
+    {
+        langName = string(argv[1]);
+    }
     Buffer langTest = gFileApi->read_entire_file(&defaultAlloc, langName);
     ast_from_tlk(&mainAst, langName, langTest);
-#else
-    // NOTE(michiel): 2 * (3 + 4) / (6 * 7 + 1) + (0 - 4) * 5
-    // (2 * (3 + 4)) / ((6 * 7) + 1) + ((0 - 4) * 5)
-    
-    Expression *const2 = create_signed_int(&mainAst, 2);
-    Expression *const3 = create_signed_int(&mainAst, 3);
-    Expression *const4a = create_signed_int(&mainAst, 4);
-    Expression *const6 = create_signed_int(&mainAst, 6);
-    Expression *const7 = create_signed_int(&mainAst, 7);
-    Expression *const1 = create_signed_int(&mainAst, 1);
-    Expression *const0 = create_signed_int(&mainAst, 0);
-    Expression *const4b = create_signed_int(&mainAst, 4);
-    Expression *const5 = create_signed_int(&mainAst, 5);
-    
-    Expression *const1234 = create_signed_int(&mainAst, 0x1234);
-    Expression *named = create_identifier(&mainAst, static_string("test"));
-    Statement *set1  = create_assign_stmt(&mainAst, Assign_Set, named, const1234);
-    
-    Expression *add1 = create_binary_expr(&mainAst, Binary_Add, const3, const4a);
-    Expression *mul1 = create_binary_expr(&mainAst, Binary_Mul, const2, add1);
-    Expression *mul2 = create_binary_expr(&mainAst, Binary_Mul, const6, const7);
-    Expression *add2 = create_binary_expr(&mainAst, Binary_Add, mul2, const1);
-    Expression *div1 = create_binary_expr(&mainAst, Binary_Div, mul1, add2);
-    Expression *sub1 = create_binary_expr(&mainAst, Binary_Sub, const0, const4b);
-    Expression *mul3 = create_binary_expr(&mainAst, Binary_Mul, sub1, const5);
-    Expression *add3 = create_binary_expr(&mainAst, Binary_Add, div1, mul3);
-    Expression *sub2 = create_binary_expr(&mainAst, Binary_Sub, add3, named);
-    Expression *sub3 = create_binary_expr(&mainAst, Binary_Sub, sub2, const2);
-    Statement *ret1  = create_return_stmt(&mainAst, sub3);
-    
-    Statement *list[] = {
-        set1,
-        ret1,
-    };
-    StmtBlock *block = create_statement_block(&mainAst, array_count(list), list);
-    Function *mainFunc = create_function(&mainAst, static_string("main"), block);
-    
-    mainAst.program.main = mainFunc;
-#endif
     
     FileStream printStream = {};
     printStream.file = gFileApi->open_file(string("stdout"), FileOpen_Write);
@@ -271,9 +241,9 @@ s32 main(s32 argc, char **argv)
     graph_ast(&mainAst, "mainast.dot");
     
     u32 freeRegs = assembler->freeRegisterMask;
-    u64 callAddress = assembler->codeAt;
+    //u64 callAddress = assembler->codeAt;
+    umm callAddress = emit_program(assembler, &mainAst.program);
     fprintf(stderr, "Code at: 0x%016lX | %lu\n", callAddress, callAddress);
-    emit_program(assembler, &mainAst.program);
     dump_code(assembler, string("test.bin"));
     
     fprintf(stderr, "0x%08X == 0x%08X\n", freeRegs, assembler->freeRegisterMask);
@@ -282,7 +252,7 @@ s32 main(s32 argc, char **argv)
     // NOTE(michiel): Offset at least 64 bytes less than where the code starts. (sizeof(LinuxMemoryBlock))
     if (1 && make_executable(assembler->codeData, 4000))
     {
-        FuncCall *func = (FuncCall *)(assembler->codeData.data + callAddress);
+        AsmFuncCall *func = (AsmFuncCall *)(assembler->codeData.data + callAddress);
         u64 x = func();
         gFileApi->write_fmt_to_file(&printStream.file, "Got 0x%016lX | %ld\n", x, x);
     }

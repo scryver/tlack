@@ -55,6 +55,17 @@ graph_ast_expression(Ast *ast, FileStream *output, Expression *expression, Strin
             graph_ast_expression(ast, output, expression->eBinary.right, opStr);
         } break;
         
+        case Expr_FuncCall:
+        {
+            String funcStr = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "funcCall%p", expression);
+            graph_label(output, funcStr, "%.*s", STR_FMT(expression->eFunction.name));
+            graph_connect(output, connection, funcStr);
+            for (u32 argIdx = 0; argIdx < expression->eFunction.argCount; ++argIdx)
+            {
+                graph_ast_expression(ast, output, expression->eFunction.arguments[argIdx], funcStr);
+            }
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
 }
@@ -212,6 +223,16 @@ graph_ast_statement(Ast *ast, FileStream *output, Statement *statement, String c
             graph_ast_stmt_block(ast, output, statement->sFor.body, blockStr);
         } break;
         
+        case Stmt_Func: {
+            // TODO(michiel): Arguments
+            println(output, "subgraph cluster_%.*s {", STR_FMT(statement->sFunction.name));
+            ++output->indent;
+            graph_label(output, stmtStr, "func %.*s", STR_FMT(statement->sFunction.name));
+            graph_ast_stmt_block(ast, output, statement->sFunction.body, stmtStr);
+            --output->indent;
+            println(output, "}\n");
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
     
@@ -229,29 +250,22 @@ graph_ast_stmt_block(Ast *ast, FileStream *output, StmtBlock *block, String conn
 }
 
 internal void
-graph_ast_function(Ast *ast, FileStream *output, Function *function)
-{
-    char formatBuffer[1024];
-    String connection = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "func_%.*s", function->name);
-    
-    println(output, "subgraph cluster_%.*s {", STR_FMT(function->name));
-    ++output->indent;
-    graph_label(output, connection, "%.*s", STR_FMT(function->name));
-    graph_ast_stmt_block(ast, output, function->body, connection);
-    --output->indent;
-    println(output, "}\n");
-}
-
-internal void
 graph_ast(Ast *ast, char *fileName)
 {
     i_expect(string_length(gSpaces) == 256);
     FileStream output = {0};
     output.file = gFileApi->open_file(string(fileName), FileOpen_Write);
     
+    char formatBuffer[1024];
+    String connection = minterned_string_fmt(&ast->interns, sizeof(formatBuffer), formatBuffer, "prog%p", &ast->program);
+    
     println(&output, "digraph ast {");
     ++output.indent;
-    graph_ast_function(ast, &output, ast->program.main);
+    graph_label(&output, connection, "program");
+    for (u32 funcIdx = 0; funcIdx < ast->program.functionCount; ++funcIdx)
+    {
+        graph_ast_statement(ast, &output, ast->program.functionStmts[funcIdx], connection);
+    }
     --output.indent;
     println(&output, "}\n");
     

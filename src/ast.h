@@ -52,6 +52,13 @@ struct BinaryOp
     Expression *right;
 };
 
+struct FuncCall
+{
+    String name;
+    u32 argCount;
+    Expression **arguments;
+};
+
 enum ExprKind
 {
     Expr_None,
@@ -59,6 +66,7 @@ enum ExprKind
     Expr_Identifier,
     Expr_Unary,
     Expr_Binary,
+    Expr_FuncCall,
     //Expr_Condition,??
 };
 struct Expression
@@ -71,6 +79,7 @@ struct Expression
         String   eName;
         UnaryOp  eUnary;
         BinaryOp eBinary;
+        FuncCall eFunction;
     };
 };
 
@@ -119,6 +128,15 @@ struct ForLoop
     StmtBlock  *body;
 };
 
+struct Function
+{
+    SourcePos  origin;
+    String     name;
+    u32        argCount;
+    String    *arguments; // TODO(michiel): type and stuff
+    StmtBlock *body;
+};
+
 enum StmtKind
 {
     Stmt_None,
@@ -128,6 +146,7 @@ enum StmtKind
     Stmt_DoWhile,
     Stmt_While,
     Stmt_For,
+    Stmt_Func,
 };
 struct Statement
 {
@@ -141,19 +160,14 @@ struct Statement
         ConditionBlock sDo;
         ConditionBlock sWhile;
         ForLoop        sFor;
+        Function       sFunction;
     };
-};
-
-struct Function
-{
-    SourcePos  origin;
-    String     name;
-    StmtBlock *body;
 };
 
 struct Program
 {
-    Function *main;
+    u32 functionCount;
+    Statement **functionStmts;
 };
 
 struct Ast

@@ -43,6 +43,7 @@ emit_x_md(a, op, Reg_RBP, (offset)); \
 // NOTE(michiel): RAX/RDX are very volatile
 //                RBX, R12-R15 are callee-saved, so try not to use them
 global Register gUsableRegisters[] = {Reg_RCX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10, Reg_R11, Reg_RAX, Reg_RDX};
+global Register gSavedRegisters[] = {Reg_RBX, Reg_R12, Reg_R13, Reg_R14, Reg_R15};
 
 internal void emit_mov(Assembler *assembler, AsmOperand *dst, AsmOperand *src);
 
@@ -63,19 +64,26 @@ is_register_used(Assembler *assembler, Register reg)
 internal void
 deallocate_register(Assembler *assembler, Register oldReg)
 {
-    //fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
-    i_expect((assembler->freeRegisterMask & (1 << (oldReg & 0xF))) == 0);
-    assembler->freeRegisterMask |= (1 << (oldReg & 0xF));
-    AsmRegUser *user = assembler->registerUsers + (oldReg & 0xF);
-    if (user->kind == AsmReg_Symbol)
+    if ((oldReg == Reg_RBX) || ((oldReg >= Reg_R12) && (oldReg <= Reg_R15)))
     {
-        AsmSymbol *symbol = user->symbol;
-        i_expect(symbol);
-        symbol->loadedRegister = Reg_None;
+        // NOTE(michiel): Skip for now
     }
-    user->kind = AsmReg_None;
-    user->hold = false;
-    user->symbol = 0;
+    else
+    {
+        //fprintf(stderr, "Free 0x%02X\n", oldReg & 0xF);
+        i_expect((assembler->freeRegisterMask & (1 << (oldReg & 0xF))) == 0);
+        assembler->freeRegisterMask |= (1 << (oldReg & 0xF));
+        AsmRegUser *user = assembler->registerUsers + (oldReg & 0xF);
+        if (user->kind == AsmReg_Symbol)
+        {
+            AsmSymbol *symbol = user->symbol;
+            i_expect(symbol);
+            symbol->loadedRegister = Reg_None;
+        }
+        user->kind = AsmReg_None;
+        user->hold = false;
+        user->symbol = 0;
+    }
 }
 
 internal void
@@ -115,18 +123,32 @@ save_all_registers(Assembler *assembler)
 internal void
 drop_all_local_registers(Assembler *assembler)
 {
-    // NOTE(michiel): Should only be called after a statement evaluation. It just frees registers used by local symbols.
+    // NOTE(michiel): Should only be called in a return statement evaluation. It frees about every register.
     for (u32 index = 0; index < array_count(gUsableRegisters); ++index)
     {
         Register reg = gUsableRegisters[index];
         if (is_register_used(assembler, reg))
         {
             AsmRegUser *user = assembler->registerUsers + (reg & 0xF);
+#if 1
             i_expect(user->kind == AsmReg_Symbol);
             if (user->symbol->operand.kind == AsmOperand_FrameOffset)
             {
                 deallocate_register(assembler, reg);
             }
+#else
+            if (user->kind == AsmReg_Symbol)
+            {
+                if (user->symbol->operand.kind == AsmOperand_FrameOffset)
+                {
+                    deallocate_register(assembler, reg);
+                }
+            }
+            else
+            {
+                deallocate_register(assembler, reg);
+            }
+#endif
         }
     }
 }
@@ -210,6 +232,12 @@ allocate_register(Assembler *assembler, Register reg = Reg_None)
         if (newUser->kind == AsmReg_Symbol)
         {
             newUser->symbol->loadedRegister = targetReg;
+            //newUser->symbol->unsaved = true;
+        }
+        else if (newUser->kind == AsmReg_TempOperand)
+        {
+            i_expect(newUser->operand->kind == AsmOperand_Register);
+            newUser->operand->oRegister = targetReg;
         }
         
         oldUser->kind = AsmReg_None;
@@ -327,6 +355,7 @@ ensure_operand_has_register_for_dst(Assembler *assembler, AsmOperand *operand, R
         reqReg->kind = AsmReg_TempOperand;
         reqReg->operand = operand;
         emit_operand_to_register(assembler, operand, reg);
+        deallocate_operand(assembler, operand);
         operand->kind = AsmOperand_Register;
         operand->oRegister = reg;
     }
@@ -339,6 +368,7 @@ ensure_operand_has_register_for_dst(Assembler *assembler, AsmOperand *operand, R
         operandUsage->kind = AsmReg_TempOperand;
         operandUsage->operand = operand;
         emit_operand_to_register(assembler, operand, operandUsage->reg);
+        deallocate_operand(assembler, operand);
         operand->kind = AsmOperand_Register;
         operand->oRegister = operandUsage->reg;
     }
@@ -404,6 +434,15 @@ emit_logical_not(Assembler *assembler, AsmOperand *operand)
         emit_r_r(assembler, xor, operand->oRegister, operand->oRegister);
         emit_c_r(assembler, set, CC_Equal, operand->oRegister);
     }
+}
+
+internal void
+emit_call(Assembler *assembler, AsmOperand *funcAddr)
+{
+    i_expect(funcAddr->kind == AsmOperand_Address);
+    i_expect(is_32bit(funcAddr->oAddress));
+    emit_i(assembler, call, 0);
+    patch_with_operand_address(assembler, 1, funcAddr);
 }
 
 internal void
@@ -954,6 +993,129 @@ emit_expression(Assembler *assembler, Expression *expression, AsmOperand *destin
             deallocate_operand(assembler, &rightOp);
         } break;
         
+        case Expr_FuncCall: {
+            // TODO(michiel): Save away used registers to registers that are callee-saved
+            // need to know before hand if there is a function call in the current function,
+            // than we can push the callee-saved registers and use them as well.
+            i_expect(expression->eFunction.argCount < 5);
+            AsmOperand arg0 = {};
+            AsmOperand arg1 = {};
+            AsmOperand arg2 = {};
+            AsmOperand arg3 = {};
+            AsmRegUser *rdiUser = 0;
+            AsmRegUser *rsiUser = 0;
+            AsmRegUser *rdxUser = 0;
+            AsmRegUser *rcxUser = 0;
+            
+            if (expression->eFunction.argCount > 0)
+            {
+                emit_expression(assembler, expression->eFunction.arguments[0], &arg0, context);
+                ensure_operand_has_register_for_dst(assembler, &arg0, Reg_RDI);
+                rdiUser = assembler->registerUsers + (arg0.oRegister & 0xF);
+                i_expect(rdiUser->reg == Reg_RDI);
+                i_expect(rdiUser->kind == AsmReg_TempOperand);
+                i_expect(rdiUser->operand = &arg0);
+                rdiUser->hold = true;
+                
+                if (expression->eFunction.argCount > 1)
+                {
+                    emit_expression(assembler, expression->eFunction.arguments[1], &arg1, context);
+                    ensure_operand_has_register_for_dst(assembler, &arg1, Reg_RSI);
+                    rsiUser = assembler->registerUsers + (arg1.oRegister & 0xF);
+                    i_expect(rsiUser->reg == Reg_RSI);
+                    i_expect(rsiUser->kind == AsmReg_TempOperand);
+                    i_expect(rsiUser->operand = &arg1);
+                    rsiUser->hold = true;
+                    
+                    if (expression->eFunction.argCount > 2)
+                    {
+                        emit_expression(assembler, expression->eFunction.arguments[2], &arg2, context);
+                        ensure_operand_has_register_for_dst(assembler, &arg2, Reg_RDX);
+                        rdxUser = assembler->registerUsers + (arg2.oRegister & 0xF);
+                        i_expect(rdxUser->reg == Reg_RDX);
+                        i_expect(rdxUser->kind == AsmReg_TempOperand);
+                        i_expect(rdxUser->operand = &arg2);
+                        rdxUser->hold = true;
+                        
+                        if (expression->eFunction.argCount > 3)
+                        {
+                            emit_expression(assembler, expression->eFunction.arguments[3], &arg3, context);
+                            ensure_operand_has_register_for_dst(assembler, &arg3, Reg_RCX);
+                            rcxUser = assembler->registerUsers + (arg3.oRegister & 0xF);
+                            i_expect(rcxUser->reg == Reg_RCX);
+                            i_expect(rcxUser->kind == AsmReg_TempOperand);
+                            i_expect(rcxUser->operand = &arg3);
+                            rcxUser->hold = true;
+                        }
+                    }
+                }
+            }
+            
+            u32 nextSaveIdx = 0;
+            for (u32 index = 0; index < array_count(gUsableRegisters); ++index)
+            {
+                Register reg = gUsableRegisters[index];
+                if ((reg != Reg_RCX) && (reg != Reg_RDX) && (reg != Reg_RSI) && (reg != Reg_RDI) &&
+                    is_register_used(assembler, reg))
+                {
+                    i_expect(nextSaveIdx < array_count(gSavedRegisters));
+                    AsmRegUser *user = assembler->registerUsers + (reg & 0xF);
+                    if (user->kind == AsmReg_Symbol) {
+                        save_symbol(assembler, user->symbol);
+                    } else {
+                        i_expect(user->kind == AsmReg_TempOperand);
+                        if ((user->operand->kind == AsmOperand_Register) ||
+                            (user->operand->kind == AsmOperand_LockedRegister))
+                        {
+                            Register nextReg = gSavedRegisters[nextSaveIdx++];
+                            emit_r_r(assembler, mov, nextReg, user->operand->oRegister);
+                            user->operand->oRegister = nextReg;
+                            user->kind = AsmReg_None;
+                        }
+                    }
+                    deallocate_register(assembler, reg);
+                }
+            }
+            
+            AsmSymbol *funcSym = find_symbol(assembler, expression->eFunction.name);
+            i_expect(funcSym);
+            i_expect(funcSym->kind == AsmSymbol_Func);
+            i_expect(funcSym->operand.kind == AsmOperand_Address);
+            
+            AsmRegUser *raxResult = allocate_register(assembler, Reg_RAX);
+            i_expect(raxResult->reg == Reg_RAX);
+            destination->kind = AsmOperand_Register;
+            destination->oRegister = raxResult->reg;
+            raxResult->kind = AsmReg_TempOperand;
+            raxResult->operand = destination;
+            
+            AsmOperand funcOp = funcSym->operand;
+            emit_call(assembler, &funcOp);
+            deallocate_operand(assembler, &funcOp);
+            
+            if (rcxUser) {
+                i_expect(rcxUser->operand == &arg3);
+                i_expect(rcxUser->reg == arg3.oRegister);
+                deallocate_operand(assembler, &arg3);
+            }
+            if (rdxUser) {
+                i_expect(rdxUser->operand == &arg2);
+                i_expect(rdxUser->reg == arg2.oRegister);
+                deallocate_operand(assembler, &arg2);
+            }
+            if (rsiUser) {
+                i_expect(rsiUser->operand == &arg1);
+                i_expect(rsiUser->reg == arg1.oRegister);
+                deallocate_operand(assembler, &arg1);
+            }
+            if (rdiUser) {
+                i_expect(rdiUser->operand == &arg0);
+                i_expect(rdiUser->reg == arg0.oRegister);
+                deallocate_operand(assembler, &arg0);
+            }
+            
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
     
@@ -1013,7 +1175,8 @@ emit_statement(Assembler *assembler, Statement *statement)
                         else
                         {
                             emit_mov(assembler, &destination, &source);
-                            if (source.kind == AsmOperand_Register) {
+                            
+                            if (0 && source.kind == AsmOperand_Register) {
                                 AsmRegUser *user = assembler->registerUsers + (source.oRegister & 0xF);
                                 i_expect(user->kind == AsmReg_TempOperand);
                                 user->kind = AsmReg_Symbol;
@@ -1024,6 +1187,7 @@ emit_statement(Assembler *assembler, Statement *statement)
                             }
                         }
                     } break;
+                    
                     case Assign_Add: { emit_add(assembler, &destination, &source); } break;
                     case Assign_Sub: { emit_sub(assembler, &destination, &source); } break;
                     case Assign_Mul: { emit_mul(assembler, &destination, &source); } break;
@@ -1045,6 +1209,7 @@ emit_statement(Assembler *assembler, Statement *statement)
                     {
                         deallocate_register(assembler, leftSym->loadedRegister);
                     }
+                    leftSym->unsaved |= (statement->sAssign.op > Assign_Set);
                     leftSym->loadedRegister = destination.oRegister;
                     AsmRegUser *regUsage = assembler->registerUsers + (destination.oRegister & 0xF);
                     if (regUsage->kind == AsmReg_Symbol)
@@ -1091,16 +1256,24 @@ emit_statement(Assembler *assembler, Statement *statement)
                 emit_operand_to_register(assembler, &destination, Reg_RAX);
             }
             
+            deallocate_operand(assembler, &destination);
+            
             drop_all_local_registers(assembler);
             save_all_registers(assembler);
             
-            //emit_pop(assembler, Reg_EBP);
+            emit_r_i(assembler, add, Reg_RSP, 16);
+            emit_pop(assembler, Reg_R15D);
+            emit_pop(assembler, Reg_R14D);
+            emit_pop(assembler, Reg_R13D);
+            emit_pop(assembler, Reg_R12D);
+            emit_pop(assembler, Reg_EBX);
+            emit_pop(assembler, Reg_EBP);
             emit_ret(assembler);
-            deallocate_operand(assembler, &destination);
         } break;
         
         case Stmt_IfElse: {
             // TODO(michiel): Cache last compare
+            // TODO(michiel): Register validation for conditional blocks
             AsmOperand destination = {};
             ConditionCode cc = emit_expression(assembler, statement->sIf.ifBlock.condition, &destination, AsmExpr_ToCompare);
             deallocate_operand(assembler, &destination);
@@ -1243,6 +1416,81 @@ emit_statement(Assembler *assembler, Statement *statement)
             deallocate_register(assembler, counterSym->loadedRegister);
         } break;
         
+        case Stmt_Func: {
+            AsmSymbol *funcSymbol = create_global_sym(assembler, AsmSymbol_Func, statement->sFunction.name, assembler->codeAt);
+            unused(funcSymbol);
+            
+            i_expect(statement->sFunction.argCount < 5);
+            u32 funcScopeAt = assembler->localCount;
+            i_expect(funcScopeAt == 0);
+            
+            AsmRegUser *user0 = 0;
+            AsmRegUser *user1 = 0;
+            AsmRegUser *user2 = 0;
+            AsmRegUser *user3 = 0;
+            if (statement->sFunction.argCount > 0)
+            {
+                AsmSymbol *argSym0 = create_local_sym(assembler, AsmSymbol_Var, statement->sFunction.arguments[0]);
+                user0 = allocate_register(assembler, Reg_RDI);
+                user0->kind = AsmReg_Symbol;
+                user0->symbol = argSym0;
+                argSym0->loadedRegister = user0->reg;
+                argSym0->unsaved = true;
+                
+                if (statement->sFunction.argCount > 1)
+                {
+                    AsmSymbol *argSym1 = create_local_sym(assembler, AsmSymbol_Var, statement->sFunction.arguments[1]);
+                    user1 = allocate_register(assembler, Reg_RSI);
+                    user1->kind = AsmReg_Symbol;
+                    user1->symbol = argSym1;
+                    argSym1->loadedRegister = user1->reg;
+                    argSym1->unsaved = true;
+                    
+                    if (statement->sFunction.argCount > 2)
+                    {
+                        AsmSymbol *argSym2 = create_local_sym(assembler, AsmSymbol_Var, statement->sFunction.arguments[2]);
+                        user2 = allocate_register(assembler, Reg_RDX);
+                        user2->kind = AsmReg_Symbol;
+                        user2->symbol = argSym2;
+                        argSym2->loadedRegister = user2->reg;
+                        argSym2->unsaved = true;
+                        
+                        if (statement->sFunction.argCount > 3)
+                        {
+                            AsmSymbol *argSym3 = create_local_sym(assembler, AsmSymbol_Var, statement->sFunction.arguments[3]);
+                            user3 = allocate_register(assembler, Reg_RDX);
+                            user3->kind = AsmReg_Symbol;
+                            user3->symbol = argSym3;
+                            argSym3->loadedRegister = user3->reg;
+                            argSym3->unsaved = true;
+                        }
+                    }
+                }
+            }
+            
+            // TODO(michiel): This preamble should be applied for bigger functions only, when Reg_RSP will be used...,
+            // so to properly deal with this, this should be known by the AST itself.
+            // Information that is needed:
+            //    - will this function call other functions?
+            //        - if so, how many temp registers do we need?
+            //    - how many local variables are needed
+            //
+            // The push of rbx/r15 _should_ depend on temporary registers in function call expressions
+            // The sub on the RSP depends on the amount of local variables that need to be kept across
+            // function calls.
+            emit_push(assembler, Reg_EBP);
+            emit_r_r(assembler, mov, Reg_RBP, Reg_RSP);
+            emit_push(assembler, Reg_EBX);
+            emit_push(assembler, Reg_R12D);
+            emit_push(assembler, Reg_R13D);
+            emit_push(assembler, Reg_R14D);
+            emit_push(assembler, Reg_R15D);
+            emit_r_i(assembler, sub, Reg_RSP, 16);
+            emit_stmt_block(assembler, statement->sFunction.body);
+            
+            assembler->localCount = funcScopeAt;
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
 }
@@ -1256,38 +1504,51 @@ emit_stmt_block(Assembler *assembler, StmtBlock *block)
     {
         emit_statement(assembler, block->statements[stmtIdx]);
     }
+#if 1
     u32 usedRegisters = ~assembler->freeRegisterMask & freeRegisters;
     for (u32 reg = Reg_RAX; reg <= Reg_R15; ++reg)
     {
         if (usedRegisters & (1 << (reg & 0xF)))
         {
             AsmRegUser *user = assembler->registerUsers + (reg & 0xF);
+#if 0
+            if (user->kind == AsmReg_Symbol)
+            {
+                // TODO(michiel): Shouldn't this always be true?
+                save_symbol(assembler, user->symbol);
+            }
+            else
+            {
+                fprintf(stderr, "Warning: %d was usaved (kind %d)\n", user->reg & 0xf, user->kind);
+            }
+#else
             i_expect(user->kind == AsmReg_Symbol);
             save_symbol(assembler, user->symbol);
+#endif
             deallocate_register(assembler, user->reg);
         }
     }
+#endif
     assembler->localCount = localScopeAt;
 }
 
-internal umm
-emit_function(Assembler *assembler, Function *function)
-{
-    umm result = assembler->codeAt;
-    
-    AsmSymbol *funcSymbol = create_global_sym(assembler, AsmSymbol_Func, function->name, result);
-    unused(funcSymbol);
-    
-    // TODO(michiel): This preamble should be applied for bigger functions only, when Reg_RSP will be used...,
-    // so to properly deal with this, this should be known by the AST itself.
-    //emit_push(assembler, Reg_EBP);
-    emit_stmt_block(assembler, function->body);
-    
-    return result;
-}
-
+// NOTE(michiel): Returns entry point to main function
 internal umm
 emit_program(Assembler *assembler, Program *program)
 {
-    return emit_function(assembler, program->main);
+    umm result = 0;
+    for (u32 index = 0; index < program->functionCount; ++index)
+    {
+        Statement *function = program->functionStmts[index];
+        i_expect(function->kind == Stmt_Func);
+        if (function->sFunction.name == string("main"))
+        {
+            result = assembler->codeAt;
+        }
+        
+        emit_statement(assembler, function);
+        emit(assembler, 0x90);
+    }
+    
+    return result;
 }

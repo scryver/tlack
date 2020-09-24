@@ -473,6 +473,8 @@ OPERATION_1_X(neg, OC_IntArith, 0x03)
 
 OPERATION_1_R(xchg, OC_XchgRMtoR)
 
+OPERATION_1_I(call, OC_Call, 0x00)
+
 OPERATION_1_I(jmp, OC_Jump, 0x00)
 OPERATION_1_IB(jmp, OC_Jump8, 0x00)
 
@@ -514,7 +516,7 @@ emit_push(Assembler *assembler, Register reg)
 internal void
 emit_pop(Assembler *assembler, Register reg)
 {
-    emit_rex(assembler, reg, 0);
+    emit_rex(assembler, 0, reg);
     emit(assembler, OC_PopRBase | (reg & 0x7));
 }
 

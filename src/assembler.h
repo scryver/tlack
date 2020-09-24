@@ -67,6 +67,7 @@ enum AsmRegUseKind
     AsmReg_AllocatedReg,
     AsmReg_TempOperand,
     AsmReg_Symbol,
+    AsmReg_FuncResult,
 };
 struct AsmRegUser
 {

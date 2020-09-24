@@ -80,7 +80,8 @@ create_local_sym(Assembler *assembler, AsmSymbolKind kind, String name)
     result->name = name;
     result->operand.kind = AsmOperand_FrameOffset;
     result->operand.symbol = result;
-    result->operand.oFrameOffset = -8 * (s64)assembler->localCount;
+    // TODO(michiel): This -40 depends on the push of the saved registers (see emit_statement(Stmt_Func))
+    result->operand.oFrameOffset = -40 - 8 * (s64)assembler->localCount;
     return result;
 }
 

@@ -60,6 +60,20 @@ create_binary_expr(Ast *ast, BinaryOpType op, Expression *left, Expression *righ
     return result;
 }
 
+internal Expression *
+create_func_call(Ast *ast, String name, u32 argCount, Expression **arguments)
+{
+    Expression *result = allocate_expression(ast, Expr_FuncCall);
+    result->eFunction.name = minterned_string(&ast->interns, name);
+    result->eFunction.argCount = argCount;
+    if (argCount)
+    {
+        result->eFunction.arguments = (Expression **)ast_allocate(ast, sizeof(Expression *)*argCount);
+        copy(sizeof(Expression *)*argCount, arguments, result->eFunction.arguments);
+    }
+    return result;
+}
+
 internal Statement *
 create_assign_stmt(Ast *ast, AssignOpType op, Expression *left, Expression *right)
 {
@@ -122,6 +136,24 @@ create_for_stmt(Ast *ast, Statement *init, Expression *cond, Statement *next, St
     return result;
 }
 
+internal Statement *
+create_func_stmt(Ast *ast, String name, u32 argCount, String *args, StmtBlock *body)
+{
+    Statement *result = allocate_statement(ast, Stmt_Func);
+    result->sFunction.name = minterned_string(&ast->interns, name);
+    result->sFunction.argCount = argCount;
+    if (argCount)
+    {
+        result->sFunction.arguments = (String *)ast_allocate(ast, sizeof(String)*argCount);
+        for (u32 argIdx = 0; argIdx < argCount; ++argIdx)
+        {
+            result->sFunction.arguments[argIdx] = minterned_string(&ast->interns, args[argIdx]);
+        }
+    }
+    result->sFunction.body = body;
+    return result;
+}
+
 internal StmtBlock *
 create_statement_block(Ast *ast, u32 statementCount, Statement **statements)
 {
@@ -129,15 +161,6 @@ create_statement_block(Ast *ast, u32 statementCount, Statement **statements)
     result->stmtCount = statementCount;
     result->statements = (Statement **)ast_allocate(ast, sizeof(Statement *)*statementCount);
     copy(sizeof(Statement *)*statementCount, statements, result->statements);
-    return result;
-}
-
-internal Function *
-create_function(Ast *ast, String name, StmtBlock *body)
-{
-    Function *result = (Function *)ast_allocate(ast, sizeof(Function));
-    result->name = minterned_string(&ast->interns, name);
-    result->body = body;
     return result;
 }
 
@@ -189,6 +212,18 @@ print_expression(FileStream *output, Expression *expression)
             print_expression(output, expression->eBinary.left);
             print(output, " ");
             print_expression(output, expression->eBinary.right);
+            print(output, ")");
+        } break;
+        
+        case Expr_FuncCall: {
+            print(output, "(%.*s ", STR_FMT(expression->eFunction.name));
+            for (u32 argIdx = 0; argIdx < expression->eFunction.argCount; ++argIdx)
+            {
+                if (argIdx > 0) {
+                    print(output, ", ");
+                }
+                print_expression(output, expression->eFunction.arguments[argIdx]);
+            }
             print(output, ")");
         } break;
         
@@ -294,6 +329,20 @@ print_statement(FileStream *output, Statement *statement)
             println(output, ")");
         } break;
         
+        case Stmt_Func: {
+            println_begin(output, "(func %.*s (", STR_FMT(statement->sFunction.name));
+            for (u32 argIdx = 0; argIdx < statement->sFunction.argCount; ++argIdx)
+            {
+                print(output, "%s%.*s", argIdx > 0 ? ", " : "", STR_FMT(statement->sFunction.arguments[argIdx]));
+            }
+            println_end(output, ")");
+            ++output->indent;
+            print_stmt_block(output, statement->sFunction.body);
+            --output->indent;
+            println(output, ")");
+            
+        } break;
+        
         INVALID_DEFAULT_CASE;
     }
 }
@@ -321,21 +370,15 @@ print_stmt_block(FileStream *output, StmtBlock *block, b32 startNewline)
 }
 
 internal void
-print_function(FileStream *output, Function *function)
-{
-    println(output, "( func %.*s", STR_FMT(function->name));
-    ++output->indent;
-    print_stmt_block(output, function->body);
-    --output->indent;
-    println(output, ")");
-}
-
-internal void
 print_program(FileStream *output, Program *program)
 {
     println(output, "( program");
     ++output->indent;
-    print_function(output, program->main);
+    for (u32 funcIdx = 0; funcIdx < program->functionCount; ++funcIdx)
+    {
+        Statement *functionStatement = program->functionStmts[funcIdx];
+        print_statement(output, functionStatement);
+    }
     --output->indent;
     println(output, ")");
 }
